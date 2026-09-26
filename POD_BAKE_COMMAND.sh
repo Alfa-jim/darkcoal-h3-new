@@ -221,8 +221,17 @@ if [ -n "$FOUND_VALID" ]; then
   echo ""
   echo -e "${GREEN}You can STOP / TERMINATE this Pod — Network Volume persists.${NC}"
   echo "Next: Serverless → ghcr.io/alfa-jim/darkcoal-h3-new:latest  Disk 25GB  GPU A6000/4090  Min 0"
-  exit 0
+  # DON'T exit — still need to ensure required CLIP/VAEs are baked (added in v3)
+  ALREADY_BAKED=1
+  # fall through to Required H3 models check below; skip GGUF re-download
+else
+  ALREADY_BAKED=""
 fi
+
+# If GGUF already valid, skip re-download/verify and jump to Required models (still prints final SUCCESS later)
+if [ "$ALREADY_BAKED" = "1" ]; then
+  echo -e "${DIM}GGUF already valid — skipping GGUF re-download, checking required CLIP/VAEs…${NC}"
+else
 
 # If file exists but incomplete, keep it for resume (don't delete yet)
 if [ -e "$TARGET_FILE" ]; then
@@ -424,6 +433,8 @@ fi
 ln -sf "$TARGET_FILE" "$ALT_TARGET" 2>/dev/null || true
 ln -sf "$TARGET_FILE" "$ALT_LINK" 2>/dev/null || true
 
+fi # end skip-GGUF when ALREADY_BAKED
+
 # ── Required H3 models for native 0.33.1 pipeline (bakes missing — resume-safe) ─
 # playground/workflow uses:
 #   text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors  (~17GB? actually ~9GB shard)
@@ -479,7 +490,7 @@ echo ""
 echo -e "${GREEN}You can now STOP / TERMINATE this Pod — Network Volume persists.${NC}"
 echo "Next: Serverless Endpoint"
 echo "  Container: ghcr.io/alfa-jim/darkcoal-h3-new:latest"
-echo "    pinned:  ghcr.io/alfa-jim/darkcoal-h3-new:latest@sha256:9e1f7457caef102bd01be81ef2bc563b20b145a0d6e9255148d598c0d42aea86"
+echo "    pinned:  ghcr.io/alfa-jim/darkcoal-h3-new:latest@sha256:5aa2a2dc66b95f5227891e3743621fae21e069921e4b97110eab572178cf199a  # 3a24498"
 echo "  Attach SAME Network Volume (darkcoal-h3, 20GB, same region!)  Disk 25GB  GPU A6000/4090  Min 0 Max 2 Idle 5s Exec 300s"
 echo "  Test: open playground.html → paste endpoint /runsync + key → Generate"
 echo ""
