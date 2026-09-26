@@ -350,7 +350,7 @@ function shuffleActive(){for(let i=active.length-1;i>0;i--){const j=Math.floor(M
 
 // Workflow
 function buildWf(){
-  const prompt=$('prompt').value; const aspect=$('aspect').value; const dur=parseInt($('dur').value)||5; const width=parseInt($('width').value)||768;
+  const prompt=$('prompt').value; const aspect=$('aspect').value; const dur=parseInt($('dur').value)||5; let width=parseInt($('width').value)||768;
   let height=width;
   if(aspect==='16:9') height=Math.round(width*9/16/64)*64;
   else if(aspect==='9:16') height=Math.round(width*16/9/64)*64;
@@ -359,20 +359,46 @@ function buildWf(){
   else if(aspect==='21:9') height=Math.round(width*9/21/64)*64;
   let seedVal=parseInt($('seed').value); if(isNaN(seedVal)||seedVal===-1) seedVal=Math.floor(Math.random()*2147483647);
   lastSeed=seedVal; $('seedLab').textContent='seed '+seedVal;
-  const length=Math.round(dur*24);
+  // Official length: max(5, round(dur*24)) snapped to 17k+5 (H3 requirement)
+  const rawLen=Math.max(5, Math.round(dur*24));
+  const length=rawLen + (5 - (rawLen % 17)) % 17;
+  // Clamp to H3 native caps (768 short edge, 768x1344 max)
+  if(Math.min(width,height) > 768){ const s=768/Math.min(width,height); width=Math.round(width*s/32)*32; height=Math.round(height*s/32)*32; }
   const wf={};
-  wf["3"]={inputs:{unet_name:"MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"},class_type:"UnetLoaderGGUF"};
-  wf["10"]={inputs:{prompt, aspect_ratio:aspect, duration:dur},class_type:"MiniMaxH3Prompt"};
-  wf["15"]={inputs:{width,height,length},class_type:"EmptyH3LatentVideo"};
-  if(active.length){
-    const names=active.filter(r=>r.kind==='image'||r.dataUrl.startsWith('data:image')).map(r=>r.name);
-    if(names.length) wf["20"]={inputs:{images:names},class_type:"LoadImageSet"};
-    wf["25"]={inputs:{model:["3",0], conditioning:["10",0], latent:["15",0], ...(names.length?{reference_images:["20",0]}:{})},class_type:"MiniMaxH3Sampler"};
+  // Use GGUF loader for your baked Q4 (Abiray). Falls back to official safetensors if you switch volume.
+  const useGGUF=true;
+  if(useGGUF){
+    wf["100"]={inputs:{unet_name:"MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"}, class_type:"UnetLoaderGGUF"};
   } else {
-    wf["25"]={inputs:{model:["3",0], conditioning:["10",0], latent:["15",0]},class_type:"MiniMaxH3Sampler"};
+    wf["100"]={inputs:{unet_name:"minimax_h3_ref2va_pruned_int8_convrot.safetensors", weight_dtype:"default"}, class_type:"UNETLoader"};
   }
-  wf["30"]={inputs:{samples:["25",0], vae:["3",1]},class_type:"VAEDecode"};
-  wf["35"]={inputs:{filename_prefix:"h3_darkcoal_ad", images:["30",0]},class_type:"SaveVideo"};
+  wf["101"]={inputs:{clip_name:"qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", type:"minimax", device:"default"}, class_type:"CLIPLoader"};
+  wf["102"]={inputs:{vae_name:"minimax_h3_video_vae_int8_convrot.safetensors"}, class_type:"VAELoader"};
+  wf["103"]={inputs:{vae_name:"minimax_h3_audio_vae_fp32.safetensors"}, class_type:"VAELoader"};
+  const imgRefs=active.filter(r=>r.kind==='image'||r.dataUrl.startsWith('data:image'));
+  const loadIds=[];
+  imgRefs.slice(0,9).forEach((r,i)=>{
+    const nid=String(120+i);
+    wf[nid]={inputs:{image:r.name}, class_type:"LoadImage"};
+    loadIds.push(nid);
+  });
+  const refInputs={
+    clip:["101",0], vae:["102",0], audio_vae:["103",0],
+    prompt: prompt,
+    width: width, height: height, length: length,
+    ref_image_size: "match"
+  };
+  loadIds.forEach((nid,i)=>{ refInputs[`ref_images.ref_image_${i}`]=[nid,0]; });
+  wf["104"]={inputs: refInputs, class_type:"MiniMaxH3ReferenceToVideo"};
+  wf["105"]={inputs:{noise_seed: seedVal}, class_type:"RandomNoise"};
+  wf["106"]={inputs:{sampler_name:"res_multistep"}, class_type:"KSamplerSelect"};
+  wf["107"]={inputs:{scheduler:"simple", steps:20, denoise:1, model:["100",0]}, class_type:"BasicScheduler"};
+  wf["108"]={inputs:{model:["100",0], conditioning:["104",0]}, class_type:"BasicGuider"};
+  wf["109"]={inputs:{noise:["105",0], guider:["108",0], sampler:["106",0], sigmas:["107",0], latent_image:["104",1]}, class_type:"SamplerCustomAdvanced"};
+  wf["110"]={inputs:{samples:["109",0], vae:["102",0]}, class_type:"VAEDecode"};
+  wf["111"]={inputs:{samples:["109",0], vae:["103",0]}, class_type:"VAEDecodeAudio"};
+  wf["112"]={inputs:{images:["110",0], audio:["111",0], fps:24}, class_type:"CreateVideo"};
+  wf["113"]={inputs:{filename_prefix:"h3_darkcoal_ad", format:"auto", codec:"auto", video:["112",0]}, class_type:"SaveVideo"};
   if(!$('useCustom').checked) $('custom').value=JSON.stringify(wf,null,2);
   return wf;
 }
