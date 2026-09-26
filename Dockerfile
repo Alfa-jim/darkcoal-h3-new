@@ -54,8 +54,15 @@ RUN python -c "import yaml,pathlib; c=yaml.safe_load(pathlib.Path('extra_model_p
 WORKDIR /
 RUN uv pip install runpod requests websocket-client
 
-ADD src/start.sh src/network_volume.py handler.py test_input.json ./
-RUN chmod +x /start.sh
+# Lay out handler + src so both `from src.network_volume` and `from network_volume` work
+# Previous `ADD src/start.sh src/network_volume.py handler.py ... ./` flattened src/ -> / and broke `import src`
+COPY src/ ./src/
+COPY handler.py test_input.json ./
+# also keep flat copies for backward compat + ensure /start.sh exists for CMD
+RUN cp ./src/network_volume.py ./network_volume.py 2>/dev/null || true \
+ && cp ./src/start.sh ./start.sh 2>/dev/null || true \
+ && mkdir -p /src && cp ./src/network_volume.py /src/network_volume.py 2>/dev/null || true \
+ && chmod +x /start.sh ./src/start.sh
 
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
 RUN chmod +x /usr/local/bin/comfy-node-install || true

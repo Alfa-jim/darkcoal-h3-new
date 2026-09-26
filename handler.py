@@ -8,14 +8,15 @@ import base64, json, os, socket, tempfile, time, traceback, urllib.parse, uuid, 
 import requests, websocket, runpod
 from runpod.serverless.utils import rp_upload
 from io import BytesIO
-from src.network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics  # type: ignore
-# fallback if src not on path when testing locally
+# src layout differs between build flatten (ADD src/... ./) and proper src/ dir — handle both + no-src fallback
 try:
-    from network_volume import is_network_volume_debug_enabled as _dbg, run_network_volume_diagnostics as _run  # type: ignore
-    if 'is_network_volume_debug_enabled' not in dir():
-        is_network_volume_debug_enabled = _dbg  # type: ignore
-        run_network_volume_diagnostics = _run  # type: ignore
-except: pass
+    from src.network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics  # type: ignore
+except ImportError:
+    try:
+        from network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics  # type: ignore
+    except ImportError:
+        def is_network_volume_debug_enabled(): return False
+        def run_network_volume_diagnostics(): return None
 
 logging.basicConfig(level=logging.INFO)
 COMFY_HOST = "127.0.0.1:8188"
