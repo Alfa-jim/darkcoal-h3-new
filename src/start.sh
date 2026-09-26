@@ -49,6 +49,16 @@ if [ ! -d /runpod-volume/models ] && [ -d /workspace/models ]; then
   [ -e /runpod-volume/models ] || ln -s /workspace/models /runpod-volume/models 2>/dev/null || true
 fi
 mkdir -p /runpod-volume/models/diffusion_models /runpod-volume/models/unet
+# ── FIX: ComfyUI main.py execute_prestartup_script() does os.listdir() on every
+#    custom_nodes path from extra_model_paths.yaml and crashes with
+#    FileNotFoundError if /runpod-volume/custom_nodes (or input/output) doesn't exist.
+#    Network Volume starts empty — these dirs don't exist until we create them.
+#    Must run BEFORE python -u /comfyui/main.py. See worker logs:
+#    FileNotFoundError: [Errno 2] No such file or directory: '/runpod-volume/custom_nodes'
+mkdir -p /runpod-volume/custom_nodes /runpod-volume/input /runpod-volume/output
+mkdir -p /runpod-volume/models/embeddings /runpod-volume/models/checkpoints /runpod-volume/models/text_encoders /runpod-volume/models/clip_vision /runpod-volume/models/configs /runpod-volume/models/controlnet /runpod-volume/models/vae /runpod-volume/models/loras /runpod-volume/models/upscale_models
+echo "[h3] Network Volume dirs ready:"
+ls -ld /runpod-volume/custom_nodes /runpod-volume/input /runpod-volume/output /runpod-volume/models/diffusion_models 2>&1 | sed 's/^/  /'
 
 # ── Show GGUF status ──
 GGUF_PRUNED="/runpod-volume/models/diffusion_models/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"

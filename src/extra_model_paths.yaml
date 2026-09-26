@@ -12,6 +12,8 @@ comfyui:
   vae: models/vae/
   loras: models/loras/
   upscale_models: models/upscale_models/
+  # custom_nodes/input/output must exist at runtime — start.sh creates them
+  # (ComfyUI main.py execute_prestartup_script does os.listdir(custom_nodes) and crashes if missing)
   custom_nodes: custom_nodes/
   input: input/
   output: output/
