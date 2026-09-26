@@ -1,12 +1,32 @@
 {
   "input": {
     "workflow": {
-      "3": { "inputs": { "unet_name": "MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf" }, "class_type": "UnetLoaderGGUF" },
-      "10": { "inputs": { "prompt": "cinematic ad for AI roleplay platform darkcoal.online, beautiful 24yo woman with shoulder-length auburn hair, green eyes, soft smile, luxury bedroom with warm golden lighting, silk sheets, looking at camera, gentle whisper \"your story awaits\", inviting, 4k, shallow depth of field, 24fps", "aspect_ratio": "16:9", "duration": 5 }, "class_type": "MiniMaxH3Prompt" },
-      "15": { "inputs": { "width": 768, "height": 432, "length": 120 }, "class_type": "EmptyH3LatentVideo" },
-      "25": { "inputs": { "model": ["3", 0], "conditioning": ["10", 0], "latent": ["15", 0] }, "class_type": "MiniMaxH3Sampler" },
-      "30": { "inputs": { "samples": ["25", 0], "vae": ["3", 1] }, "class_type": "VAEDecode" },
-      "35": { "inputs": { "filename_prefix": "h3_darkcoal_ad", "images": ["30", 0] }, "class_type": "SaveVideo" }
+      "100": { "inputs": { "unet_name": "MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf" }, "class_type": "UnetLoaderGGUF" },
+      "101": { "inputs": { "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "type": "minimax", "device": "default" }, "class_type": "CLIPLoader" },
+      "102": { "inputs": { "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors" }, "class_type": "VAELoader" },
+      "103": { "inputs": { "vae_name": "minimax_h3_audio_vae_fp32.safetensors" }, "class_type": "VAELoader" },
+      "104": {
+        "inputs": {
+          "prompt": "cinematic ad for AI roleplay platform darkcoal.online, beautiful 24yo woman with shoulder-length auburn hair, green eyes, soft smile, luxury bedroom with warm golden lighting, silk sheets, looking at camera, gentle whisper \"your story awaits\", inviting, 4k, shallow depth of field, 24fps",
+          "width": 768,
+          "height": 432,
+          "length": 125,
+          "clip": ["101", 0],
+          "vae": ["102", 0],
+          "audio_vae": ["103", 0],
+          "ref_image_size": "match"
+        },
+        "class_type": "MiniMaxH3ReferenceToVideo"
+      },
+      "105": { "inputs": { "noise_seed": 42 }, "class_type": "RandomNoise" },
+      "106": { "inputs": { "sampler_name": "res_multistep" }, "class_type": "KSamplerSelect" },
+      "107": { "inputs": { "scheduler": "simple", "steps": 20, "denoise": 1, "model": ["100", 0] }, "class_type": "BasicScheduler" },
+      "108": { "inputs": { "model": ["100", 0], "conditioning": ["104", 0] }, "class_type": "BasicGuider" },
+      "109": { "inputs": { "noise": ["105", 0], "guider": ["108", 0], "sampler": ["106", 0], "sigmas": ["107", 0], "latent_image": ["104", 1] }, "class_type": "SamplerCustomAdvanced" },
+      "110": { "inputs": { "samples": ["109", 0], "vae": ["102", 0] }, "class_type": "VAEDecode" },
+      "111": { "inputs": { "samples": ["109", 0], "vae": ["103", 0] }, "class_type": "VAEDecodeAudio" },
+      "112": { "inputs": { "images": ["110", 0], "audio": ["111", 0], "fps": 24 }, "class_type": "CreateVideo" },
+      "113": { "inputs": { "filename_prefix": "h3_darkcoal_ad", "format": "auto", "codec": "auto", "video": ["112", 0] }, "class_type": "SaveVideo" }
     }
   }
 }

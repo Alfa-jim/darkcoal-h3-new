@@ -424,17 +424,42 @@ fi
 ln -sf "$TARGET_FILE" "$ALT_TARGET" 2>/dev/null || true
 ln -sf "$TARGET_FILE" "$ALT_LINK" 2>/dev/null || true
 
-# ── Optional VAE helpers (tiny, from unsloth — ignore failure) ──────────────
+# ── Required H3 models for native 0.33.1 pipeline (bakes missing — resume-safe) ─
+# playground/workflow uses:
+#   text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors  (~17GB? actually ~9GB shard)
+#   vae/minimax_h3_video_vae_int8_convrot.safetensors
+#   vae/minimax_h3_audio_vae_fp32.safetensors
+# Without these, ComfyUI fails to load CLIPLoader/VAELoader. Fetch from Comfy-Org/MiniMax-H3.
 echo ""
-echo -e "${DIM}Fetching VAE helpers (optional, unsloth) — ignore errors if offline${NC}"
-mkdir -p "$VOLUME/models/vae" 2>/dev/null || true
-if [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_fp16.safetensors" ]; then
-  HF_CLI download unsloth/MiniMax-H3-GGUF vae/minimax_h3_video_vae_fp16.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -3 || true
-else echo -e "${DIM}  vae video already present${NC}"; fi
+echo -e "${BOLD}── Required MiniMax-H3 models (CLIP + VAEs) ──${NC}"
+mkdir -p "$VOLUME/models/text_encoders" "$VOLUME/models/vae" 2>/dev/null || true
+[ -n "$SECONDARY" ] && mkdir -p "$SECONDARY/models/text_encoders" "$SECONDARY/models/vae" 2>/dev/null || true
+# Qwen3-VL CLIP
+if [ ! -f "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" ]; then
+  echo -e "${GREEN}→ fetching Qwen3-VL CLIP (Comfy-Org/MiniMax-H3) …${NC}"
+  HF_CLI download Comfy-Org/MiniMax-H3 qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors --local-dir "$VOLUME/models/text_encoders" --local-dir-use-symlinks False 2>&1 | tail -5 || true
+  # hf download flattens? ensure correct name/loc
+  find "$VOLUME/models/text_encoders" -name "qwen3vl*" -type f 2>/dev/null | head
+else echo -e "${GREEN}✔ text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors present${NC}"; fi
+# Video VAE
+if [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_int8_convrot.safetensors" ]; then
+  echo -e "${GREEN}→ fetching video VAE …${NC}"
+  HF_CLI download Comfy-Org/MiniMax-H3 minimax_h3_video_vae_int8_convrot.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -5 || true
+else echo -e "${GREEN}✔ vae/minimax_h3_video_vae_int8_convrot.safetensors present${NC}"; fi
+# Audio VAE
 if [ ! -f "$VOLUME/models/vae/minimax_h3_audio_vae_fp32.safetensors" ]; then
-  HF_CLI download unsloth/MiniMax-H3-GGUF vae/minimax_h3_audio_vae_fp32.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -3 || true
-else echo -e "${DIM}  vae audio already present${NC}"; fi
-[ -n "$SECONDARY" ] && mkdir -p "$SECONDARY/models/vae" 2>/dev/null || true
+  echo -e "${GREEN}→ fetching audio VAE …${NC}"
+  HF_CLI download Comfy-Org/MiniMax-H3 minimax_h3_audio_vae_fp32.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -5 || true
+else echo -e "${GREEN}✔ vae/minimax_h3_audio_vae_fp32.safetensors present${NC}"; fi
+# Cross-link secondary view
+if [ -n "$SECONDARY" ]; then
+  for f in qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors; do [ -f "$VOLUME/models/text_encoders/$f" ] && ln -sf "$VOLUME/models/text_encoders/$f" "$SECONDARY/models/text_encoders/$f" 2>/dev/null || true; done
+  for f in minimax_h3_video_vae_int8_convrot.safetensors minimax_h3_audio_vae_fp32.safetensors; do [ -f "$VOLUME/models/vae/$f" ] && ln -sf "$VOLUME/models/vae/$f" "$SECONDARY/models/vae/$f" 2>/dev/null || true; done
+  mkdir -p /runpod-volume/models/text_encoders /runpod-volume/models/vae 2>/dev/null || true
+  for f in qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors; do [ -f "$VOLUME/models/text_encoders/$f" ] && ln -sf "$VOLUME/models/text_encoders/$f" /runpod-volume/models/text_encoders/"$f" 2>/dev/null || true; done
+  for f in minimax_h3_video_vae_int8_convrot.safetensors minimax_h3_audio_vae_fp32.safetensors; do [ -f "$VOLUME/models/vae/$f" ] && ln -sf "$VOLUME/models/vae/$f" /runpod-volume/models/vae/"$f" 2>/dev/null || true; done
+fi
+echo -e "${DIM}  (if downloads failed due to network, re-run script — it resumes)${NC}"
 
 # ── Final report ─────────────────────────────────────────────────────────────
 echo ""
