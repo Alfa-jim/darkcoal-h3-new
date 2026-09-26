@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>darkcoal-h3-new — MiniMax H3 Ad Studio</title>
+<style>
+:root{--bg:#080a12;--panel:#111527;--panel2:#171b34;--border:#22274a;--accent:#ff3b6b;--accent2:#ff8f5a;--accent3:#7c5cff;--text:#eef0ff;--muted:#8e93b8;--ok:#22c55e;--err:#ef4444}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--text)}
+a{color:#9aa3ff}
+.top{position:sticky;top:0;z-index:30;background:rgba(8,10,18,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent3));display:grid;place-items:center;font-weight:900}
+.badge{font-size:10px;padding:4px 8px;border-radius:99px;background:var(--panel2);border:1px solid var(--border);color:var(--muted)}
+.top input{flex:1;min-width:220px;max-width:420px;background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:7px 10px;font-size:12px;outline:none}
+.top input:focus{border-color:var(--accent)}
+.grid{display:grid;grid-template-columns:360px 1fr 380px;min-height:calc(100vh - 52px)}
+@media(max-width:1220px){.grid{grid-template-columns:1fr}.side{border-right:none;border-bottom:1px solid var(--border)}}
+.side{background:var(--panel);border-right:1px solid var(--border);padding:12px;overflow:auto}
+.center{padding:12px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:12px}
+label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:block;margin:8px 0 4px}
+label:first-child{margin-top:0}
+input[type=text],input[type=number],textarea,select{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:8px 10px;font-size:12px;outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:64px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.btn{appearance:none;border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer;font-size:12px}
+.btn:hover{border-color:var(--accent)}
+.btn.pri{background:linear-gradient(135deg,var(--accent),#c81d4a);border-color:transparent;color:#fff}
+.btn.pri:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:transparent}
+.btn.sm{padding:6px 10px;font-size:11px;border-radius:8px}
+.drop{border:1px dashed var(--border);border-radius:12px;padding:14px;text-align:center;background:var(--panel2);cursor:pointer}
+.thumb{width:100%;max-height:160px;object-fit:cover;border-radius:10px;border:1px solid var(--border);background:#0a0d1c}
+.small{font-size:10px;color:var(--muted)}
+.kv{font-size:11px;color:var(--muted);line-height:1.6}
+.kv b{color:var(--text)}
+.log{font-family:ui-monospace,Consolas,monospace;font-size:10px;white-space:pre-wrap;background:#0a0d1c;border:1px solid var(--border);border-radius:10px;padding:8px;max-height:240px;overflow:auto}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.tile{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--panel2)}
+.tile video,.tile img{width:100%;display:block}
+.tile .meta{padding:6px;font-size:10px;color:var(--muted)}
+.vault{display:grid;gap:8px}
+.item{border:1px solid var(--border);border-radius:12px;padding:8px;background:var(--panel2);display:flex;gap:8px}
+.item img{width:58px;height:58px;object-fit:cover;border-radius:9px;border:1px solid var(--border);flex-shrink:0}
+.item .info{flex:1;min-width:0}
+.item .info b{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{padding:6px 10px;border-radius:99px;border:1px solid var(--border);background:var(--panel2);font-size:11px;cursor:pointer}
+.tab.on{background:var(--accent);border-color:transparent;color:#fff}
+.hidden{display:none}
+.switch{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.chip{display:inline-flex;gap:4px;align-items:center;font-size:10px;padding:4px 8px;border-radius:99px;background:var(--panel2);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div class="top">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="logo">H3</div>
+    <div>
+      <div style="font-weight:900;letter-spacing:.02em">darkcoal-h3-new · MiniMax H3 Ad Studio</div>
+      <div class="small">Ref2VA Q4_K_M 11.6GB · 24fps + 32kHz stereo · for darkcoal.online</div>
+    </div>
+  </div>
+  <span class="badge">ghcr.io/alfa-jim/darkcoal-h3-new:latest</span>
+  <input id="ep" placeholder="https://api.runpod.ai/v2/<endpoint-id>/runsync"/>
+  <input id="key" placeholder="RunPod API key rpa_..."/>
+  <span id="st" class="badge">idle</span>
+</div>
+
+<div class="grid">
+  <div class="side">
+    <div class="tabs" style="margin-bottom:10px">
+      <button class="tab on" data-tab="chars" onclick="tab('chars')">Characters</button>
+      <button class="tab" data-tab="scenes" onclick="tab('scenes')">Scenes</button>
+      <button class="tab" data-tab="bgs" onclick="tab('bgs')">Backgrounds</button>
+      <button class="tab" data-tab="sounds" onclick="tab('sounds')">Sounds</button>
+      <button class="tab" data-tab="ads" onclick="tab('ads')">Ads</button>
+    </div>
+
+    <div id="tab-chars">
+      <div class="small">Characters are <b>localStorage base64</b> — up to 9 refs each. <b>Use</b> injects into Active.</div>
+      <div style="display:flex;gap:6px;margin-top:8px"><input id="charName" type="text" placeholder="e.g. Luna — beach blonde"/><button class="btn sm pri" onclick="newChar()">+ Character</button></div>
+      <div id="charList" class="vault" style="margin-top:10px"></div>
+      <div class="small" style="margin-top:8px">Tip: front + side + outfit = best identity lock.</div>
+    </div>
+
+    <div id="tab-scenes" class="hidden">
+      <div class="small">Scene = prompt snippet. <b>Use</b> appends to prompt.</div>
+      <div style="display:flex;gap:6px;margin-top:8px"><input id="sceneName" type="text" placeholder="Scene name"/><button class="btn sm pri" onclick="newScene()">+ Scene</button></div>
+      <textarea id="scenePrompt" rows="2" placeholder="e.g. luxury bedroom, silk sheets, golden hour, bokeh"></textarea>
+      <div id="sceneList" class="vault" style="margin-top:8px"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn sm ghost" onclick="addBuiltIns()">+ built-ins</button><button class="btn sm ghost" onclick="exportScenes()">export</button><button class="btn sm ghost" onclick="document.getElementById('sceneImp').click()">import</button></div>
+      <input id="sceneImp" type="file" accept=".json" class="hidden" onchange="onSceneImp(this)"/>
+    </div>
+
+    <div id="tab-bgs" class="hidden">
+      <div class="small">Background plates (images) + prompt tokens.</div>
+      <input id="bgFile" type="file" accept="image/*" multiple class="hidden" onchange="onBgFiles(this.files)"/>
+      <button class="btn sm" onclick="document.getElementById('bgFile').click()">Upload background plate(s)</button>
+      <div id="bgList" class="vault" style="margin-top:8px"></div>
+      <label>Background tokens</label><textarea id="bgTok" rows="2" placeholder="e.g. bokeh city lights, rain window"></textarea>
+      <button class="btn sm ghost" onclick="saveBgTok()">save token</button>
+      <div id="bgToks" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
+    </div>
+
+    <div id="tab-sounds" class="hidden">
+      <div class="small">H3 generates <b>32kHz stereo</b> natively. Add up to 3 audio + 3 video refs (total ≤12).</div>
+      <input id="audFile" type="file" accept="audio/*,video/*" multiple class="hidden" onchange="onAudFiles(this.files)"/>
+      <button class="btn sm" onclick="document.getElementById('audFile').click()">Upload audio ref (mp3/wav)</button>
+      <div id="audList" class="vault" style="margin-top:8px"></div>
+      <label>Video refs</label>
+      <input id="vidFile" type="file" accept="video/*" multiple class="hidden" onchange="onVidFiles(this.files)"/>
+      <button class="btn sm ghost" onclick="document.getElementById('vidFile').click()">Upload video ref (mp4)</button>
+      <div id="vidList" class="vault" style="margin-top:8px"></div>
+    </div>
+
+    <div id="tab-ads" class="hidden">
+      <div class="small">One-click ad templates for <b>darkcoal.online</b> — 5-6s hooks.</div>
+      <div id="adsList" class="vault" style="margin-top:8px"></div>
+      <hr/>
+      <div class="small"><b>CTA overlays</b> (add in post, not prompt unless whisper):</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="chip">Your story awaits — darkcoal.online</span><span class="chip">Chat now →</span><span class="chip">18+ AI Roleplay</span></div>
+      <label>Custom CTA</label><input id="cta" type="text" value="Your story awaits — darkcoal.online"/>
+      <label class="switch"><input id="ctaInPrompt" type="checkbox"/> whisper CTA in prompt</label>
+    </div>
+
+    <hr/>
+    <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:11px">Active refs (will be sent)</b><span id="cnt" class="badge">0 / 12</span></div>
+    <div class="small">Up to 9 images / 3 videos / 3 audios. First = strongest identity.</div>
+    <div id="active" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px"></div>
+    <div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm ghost" onclick="clearActive()">clear</button><button class="btn sm ghost" onclick="shuffleActive()">shuffle</button></div>
+  </div>
+
+  <div class="center">
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="goBtn" class="btn pri" onclick="generate()">Generate — runsync</button>
+        <button class="btn sm ghost" onclick="rndSeed()">random seed</button>
+        <span id="timer" class="badge">—</span><span id="seedLab" class="small"></span>
+        <span class="small" style="margin-left:auto">Mode: <b id="modeLab">T2VA if none, Ref2VA if refs</b></span>
+      </div>
+      <hr/>
+      <div id="preview" style="min-height:380px;display:grid;place-items:center;border:1px solid var(--border);border-radius:14px;background:#0a0d1c;overflow:hidden;position:relative">
+        <div class="small" style="padding:28px;text-align:center">No video yet — pick a character + scene + hit Generate.<br/>24 FPS · 32kHz mp4</div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm ghost" onclick="downloadLast()">download mp4</button>
+        <button class="btn sm ghost" onclick="copyPayload()">copy payload</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <b style="font-size:11px">Prompt — ad copy</b>
+      <textarea id="prompt" rows="4">cinematic ad for AI roleplay platform darkcoal.online, beautiful 24yo woman with shoulder-length auburn hair, green eyes, soft smile, luxury bedroom with warm golden lighting, silk sheets, looking at camera, gentle whisper "your story awaits", inviting, 4k, shallow depth of field, 24fps</textarea>
+      <div class="row">
+        <div><label>Negative prompt</label><textarea id="neg" rows="2">blurry, lowres, bad anatomy, extra fingers, watermark, text, logo, deformed</textarea></div>
+        <div>
+          <label>Aspect & Duration</label>
+          <div class="row"><select id="aspect"><option value="16:9" selected>16:9 landscape</option><option value="9:16">9:16 vertical</option><option value="1:1">1:1 square</option><option value="4:3">4:3</option><option value="21:9">21:9</option></select><select id="dur"><option value="4">4s</option><option value="5" selected>5s</option><option value="6">6s</option><option value="8">8s</option><option value="10">10s</option><option value="12">12s</option><option value="15">15s</option></select></div>
+          <div class="row" style="margin-top:6px"><select id="width"><option value="1280">1280×720 HD (slow)</option><option value="1024">1024×576</option><option value="768" selected>768p native</option></select><select id="fps"><option value="24" selected>24 FPS</option></select></div>
+          <label class="switch" style="margin-top:8px"><input id="withAudio" type="checkbox" checked/> synchronized audio (32kHz stereo)</label>
+        </div>
+      </div>
+      <div class="row"><div><label>Seed (-1 random)</label><input id="seed" type="number" value="-1"/></div><div><label>Batch</label><input id="batch" type="number" value="1" min="1" max="2"/></div></div>
+      <div class="small">Ref2VA keeps identity locked — use 2-3 char images (front/side/outfit) + scene text.</div>
+    </div>
+
+    <div class="card">
+      <b style="font-size:11px">Raw workflow (API format) — editable</b>
+      <div class="small">When checked, Generate uses this JSON directly.</div>
+      <label class="switch"><input id="useCustom" type="checkbox"/> use custom workflow below</label>
+      <textarea id="custom" rows="10" placeholder='{"3":{"inputs":{"unet_name":"MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"}, ...}'></textarea>
+      <div class="row"><button class="btn sm ghost" onclick="fillCustom()">fill from settings</button><button class="btn sm ghost" onclick="fmtCustom()">format</button><button class="btn sm ghost" onclick="copyPayload()">copy</button></div>
+    </div>
+
+    <div class="card"><b style="font-size:11px">Log</b><div id="log" class="log">idle — set endpoint + key, build ad, generate.</div></div>
+  </div>
+
+  <div class="side">
+    <b style="font-size:11px">Gallery — generated ads</b>
+    <div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm ghost" onclick="clearGal()">clear</button><button class="btn sm ghost" onclick="openAll()">open all</button></div>
+    <div id="gallery" class="gallery" style="margin-top:10px"></div>
+    <hr/>
+    <b style="font-size:11px">Projects — save ad pack</b>
+    <div class="small">Bundle prompt + refs + settings as local project.</div>
+    <div style="display:flex;gap:6px;margin-top:6px"><input id="projName" type="text" placeholder="Project name"/><button class="btn sm pri" onclick="saveProj()">save</button></div>
+    <div id="projList" style="display:grid;gap:6px;margin-top:8px"></div>
+    <div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm ghost" onclick="exportProjs()">export .json</button><button class="btn sm ghost" onclick="document.getElementById('projImp').click()">import</button></div>
+    <input id="projImp" type="file" accept=".json" class="hidden" onchange="onProjImp(this)"/>
+    <hr/>
+    <b style="font-size:11px">Export</b>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn sm" onclick="copyLink()">copy share link</button><button class="btn sm ghost" onclick="dlPayload()">payload .json</button><button class="btn sm ghost" onclick="dlProj()">project .json</button></div>
+    <hr/>
+    <div class="kv">
+      Image: <b>ghcr.io/alfa-jim/darkcoal-h3-new:latest</b><br/>
+      Disk <b>25GB</b> · GPU <b>A6000/4090 24GB</b> · model <b>MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf 11.6GB</b> at <code>/runpod-volume/models/diffusion_models/</code><br/>
+      Path: <select id="epPath" style="width:auto;display:inline-block"><option value="runsync" selected>runsync (wait)</option><option value="run">run (poll)</option></select>
+    </div>
+    <div class="small" style="margin-top:6px">Cold start ~25s (Network Volume). Warm ~120-180s. ~$0.02/video on A6000.</div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const LS='dc-h3-new-';
+let active=[]; let chars=[], scenes=[], bgs=[], bgTokens=[], auds=[], vids=[]; let lastSrc=null, lastSeed=null;
+
+function log(m){const el=$('log');el.textContent+='\n['+new Date().toLocaleTimeString()+'] '+m;el.scrollTop=el.scrollHeight}
+function status(t,ok){$('st').textContent=t; $('st').style.color=ok===true?'var(--ok)':ok===false?'var(--err)':''}
+function tab(n){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on', b.dataset.tab===n));['chars','scenes','bgs','sounds','ads'].forEach(x=>{const el=document.getElementById('tab-'+x); if(el) el.classList.toggle('hidden', (x==='chars'?'chars':x) !== n && (x==='bgs'?'bgs':x) !== n && x!==n);}); if(n==='chars'){document.getElementById('tab-chars').classList.remove('hidden');}
+ // normalize: our tab ids are chars/scenes/bgs/sounds/ads
+ document.getElementById('tab-chars').classList.toggle('hidden', n!=='chars');
+ document.getElementById('tab-scenes').classList.toggle('hidden', n!=='scenes');
+ document.getElementById('tab-bgs').classList.toggle('hidden', n!=='bgs');
+ document.getElementById('tab-sounds').classList.toggle('hidden', n!=='sounds');
+ document.getElementById('tab-ads').classList.toggle('hidden', n!=='ads');
+}
+function loadLS(k,f){try{const v=localStorage.getItem(LS+k);return v?JSON.parse(v):f}catch(e){return f}}
+function saveLS(k,v){localStorage.setItem(LS+k, JSON.stringify(v))}
+function initPersist(){
+  const ep=localStorage.getItem(LS+'ep'); if(ep) $('ep').value=ep;
+  const ak=localStorage.getItem(LS+'key'); if(ak) $('key').value=ak;
+  if(!ep||!ak){
+    const qE=localStorage.getItem('darkcoal-h3-endpoint')||localStorage.getItem('illustrious.endpoint');
+    const qK=localStorage.getItem('darkcoal-h3-apikey')||localStorage.getItem('illustrious.apikey');
+    if(qE && !$('ep').value) $('ep').value=qE;
+    if(qK && !$('key').value) $('key').value=qK;
+  }
+  $('ep').addEventListener('input',()=>localStorage.setItem(LS+'ep',$('ep').value));
+  $('key').addEventListener('input',()=>localStorage.setItem(LS+'key',$('key').value));
+  chars=loadLS('chars',[]); scenes=loadLS('scenes',[]); bgs=loadLS('bgs',[]); bgTokens=loadLS('bgTokens',[]); auds=loadLS('auds',[]); vids=loadLS('vids',[]); active=loadLS('active',[]);
+}
+
+// Characters
+function renderChars(){
+  const w=$('charList'); w.innerHTML='';
+  if(!chars.length) w.innerHTML='<div class="small" style="padding:10px;border:1px dashed var(--border);border-radius:10px;text-align:center">No characters — create one, then add images.</div>';
+  chars.forEach((c,i)=>{
+    const thumb=c.images[0]?.dataUrl||'';
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<img src="${thumb||'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2258%22 height=%2258%22><rect width=%2258%22 height=%2258%22 fill=%22%23171b34%22/><text x=%2229%22 y=%2234%22 text-anchor=%22middle%22 fill=%22%238e93b8%22>?</text></svg>'}"/><div class="info"><b>${c.name}</b><span class="small">${c.images.length} refs</span><div style="display:flex;gap:4px;margin-top:6px"><button class="btn sm pri" onclick="useChar(${i})">Use</button><button class="btn sm ghost" onclick="addImgsToChar(${i})">+ imgs</button><button class="btn sm ghost" onclick="renameChar(${i})">edit</button><button class="btn sm ghost" onclick="delChar(${i})">×</button></div></div>`;
+    w.appendChild(d);
+  }); saveLS('chars',chars);
+}
+function newChar(){const n=$('charName').value.trim(); if(!n) return alert('Name required'); chars.unshift({name:n, images:[]}); $('charName').value=''; renderChars(); renderActive(); setTimeout(()=>addImgsToChar(0),80);}
+function addImgsToChar(i){const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.multiple=true; inp.onchange=()=>{[...inp.files].forEach(f=>{const r=new FileReader(); r.onload=()=>{chars[i].images.push({name:f.name,dataUrl:r.result}); if(chars[i].images.length>9) chars[i].images=chars[i].images.slice(0,9); renderChars();}; r.readAsDataURL(f);})}; inp.click();}
+function useChar(i){const c=chars[i]; active=[]; c.images.slice(0,9).forEach((im,idx)=>{const ext=im.name.split('.').pop()||'png'; active.push({name:`char_${i}_${idx}.${ext}`, dataUrl:im.dataUrl, base64:im.dataUrl.split(',')[1], kind:'image'});}); renderActive(); log('using '+c.name+' '+c.images.length+' refs');}
+function renameChar(i){const n=prompt('Rename', chars[i].name); if(n){chars[i].name=n; renderChars();}}
+function delChar(i){if(!confirm('Delete '+chars[i].name+'?'))return; chars.splice(i,1); renderChars();}
+
+// Scenes
+function renderScenes(){
+  const w=$('sceneList'); w.innerHTML='';
+  scenes.forEach((s,i)=>{
+    const d=document.createElement('div'); d.className='item'; d.style.flexDirection='column';
+    d.innerHTML=`<div style="display:flex;justify-content:space-between;width:100%"><b style="font-size:12px">${s.name}</b><span class="small">${s.prompt.slice(0,36)}…</span></div><div class="small" style="white-space:pre-wrap">${s.prompt}</div><div style="display:flex;gap:4px;margin-top:6px"><button class="btn sm pri" onclick="useScene(${i})">Use</button><button class="btn sm ghost" onclick="delScene(${i})">×</button></div>`;
+    w.appendChild(d);
+  }); saveLS('scenes',scenes);
+}
+function newScene(){const n=$('sceneName').value.trim(), p=$('scenePrompt').value.trim(); if(!n||!p) return alert('Name + prompt needed'); scenes.unshift({name:n,prompt:p}); $('sceneName').value=''; $('scenePrompt').value=''; renderScenes();}
+function useScene(i){const s=scenes[i]; const extra=$('ctaInPrompt').checked && $('cta').value ? ', whispers "'+$('cta').value+'"' : ''; $('prompt').value = s.prompt + extra + ' — ' + $('prompt').value; log('scene '+s.name);}
+function delScene(i){scenes.splice(i,1); renderScenes();}
+function addBuiltIns(){
+  const bi=[
+    {name:'Luxury Bedroom',prompt:'luxury bedroom, silk sheets, warm golden hour light, soft bokeh, intimate, shallow depth of field'},
+    {name:'Neon Club',prompt:'neon cyber club, pink blue lights, crowd bokeh, moody, cinematic anamorphic'},
+    {name:'Beach Sunset',prompt:'tropical beach sunset, golden light, gentle waves, warm breeze, dreamy haze'},
+    {name:'Fantasy Tavern',prompt:'medieval fantasy tavern, warm firelight, wooden interior, magical ambience'},
+    {name:'Office Noir',prompt:'modern office at night, city lights through window, dramatic shadows, noir'},
+    {name:'Cyber Street',prompt:'rainy cyberpunk street, neon reflections, wet pavement, night, cinematic'},
+    {name:'Velvet Lounge',prompt:'velvet lounge, dim ambient light, champagne, luxury, film grain'},
+    {name:'Rooftop Night',prompt:'rooftop at night, city skyline bokeh, wind in hair, cinematic drone pull'},
+  ];
+  bi.forEach(b=>{ if(!scenes.find(s=>s.name===b.name)) scenes.push(b);});
+  renderScenes(); log('built-ins added');
+}
+function exportScenes(){const blob=new Blob([JSON.stringify(scenes,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='h3-scenes.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000);}
+function onSceneImp(inp){const f=inp.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{try{const arr=JSON.parse(r.result); if(Array.isArray(arr)){scenes=arr.concat(scenes); renderScenes(); log('imported '+arr.length)}}catch(e){alert(e.message)}}; r.readAsText(f); inp.value='';}
+
+// Backgrounds
+function renderBgs(){
+  const w=$('bgList'); w.innerHTML='';
+  bgs.forEach((bg,i)=>{
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<img src="${bg.dataUrl}"/><div class="info"><b>${bg.name}</b><span class="small">plate</span><div style="display:flex;gap:4px;margin-top:6px"><button class="btn sm pri" onclick="useBg(${i})">Use</button><button class="btn sm ghost" onclick="delBg(${i})">×</button></div></div>`;
+    w.appendChild(d);
+  }); saveLS('bgs',bgs);
+  const tw=$('bgToks'); tw.innerHTML='';
+  bgTokens.forEach((t,i)=>{const s=document.createElement('span'); s.className='chip'; s.innerHTML=`${t} <a href="#" onclick="delBgTok(${i});return false" style="color:var(--muted)">×</a>`; tw.appendChild(s);});
+}
+function onBgFiles(files){[...files].forEach(f=>{const r=new FileReader(); r.onload=()=>{bgs.push({name:f.name,dataUrl:r.result}); if(bgs.length>20) bgs=bgs.slice(-20); renderBgs();}; r.readAsDataURL(f);})}
+function useBg(i){active.push({name:`bg_${i}.png`, dataUrl:bgs[i].dataUrl, base64:bgs[i].dataUrl.split(',')[1], kind:'image'}); if(active.length>12) active=active.slice(0,12); renderActive(); log('bg added');}
+function delBg(i){bgs.splice(i,1); renderBgs();}
+function saveBgTok(){const v=$('bgTok').value.trim(); if(!v) return; bgTokens.push(v); $('bgTok').value=''; renderBgs(); saveLS('bgTokens',bgTokens);}
+function delBgTok(i){bgTokens.splice(i,1); renderBgs(); saveLS('bgTokens',bgTokens);}
+
+// Audio/video
+function renderAV(){
+  const aw=$('audList'); aw.innerHTML='';
+  auds.forEach((a,i)=>{
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<div class="info"><b>${a.name}</b><span class="small">${(a.size/1024).toFixed(0)} KB</span><audio controls src="${a.dataUrl}" style="width:100%;margin-top:4px"></audio><div style="display:flex;gap:4px;margin-top:6px"><button class="btn sm pri" onclick="useAud(${i})">Use</button><button class="btn sm ghost" onclick="delAud(${i})">×</button></div></div>`;
+    aw.appendChild(d);
+  }); saveLS('auds',auds);
+  const vw=$('vidList'); vw.innerHTML='';
+  vids.forEach((v,i)=>{
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML=`<video src="${v.dataUrl}" style="width:80px;height:56px;object-fit:cover;border-radius:8px" muted></video><div class="info"><b>${v.name}</b><span class="small">${(v.size/1024).toFixed(0)} KB</span><div style="display:flex;gap:4px;margin-top:6px"><button class="btn sm pri" onclick="useVid(${i})">Use</button><button class="btn sm ghost" onclick="delVid(${i})">×</button></div></div>`;
+    vw.appendChild(d);
+  }); saveLS('vids',vids);
+}
+function onAudFiles(files){[...files].forEach(f=>{const r=new FileReader(); r.onload=()=>{auds.push({name:f.name,dataUrl:r.result,size:f.size}); renderAV();}; r.readAsDataURL(f);})}
+function onVidFiles(files){[...files].forEach(f=>{const r=new FileReader(); r.onload=()=>{vids.push({name:f.name,dataUrl:r.result,size:f.size}); renderAV();}; r.readAsDataURL(f);})}
+function useAud(i){active.push({name:`audio_${i}.mp3`, dataUrl:auds[i].dataUrl, base64:auds[i].dataUrl.split(',')[1], kind:'audio'}); if(active.length>12) active=active.slice(0,12); renderActive();}
+function useVid(i){active.push({name:`video_${i}.mp4`, dataUrl:vids[i].dataUrl, base64:vids[i].dataUrl.split(',')[1], kind:'video'}); if(active.length>12) active=active.slice(0,12); renderActive();}
+function delAud(i){auds.splice(i,1); renderAV();}
+function delVid(i){vids.splice(i,1); renderAV();}
+
+// Ads
+const adPresets=[
+  {name:'Hook — Whisper Close', dur:5, aspect:'9:16', prompt:'extreme close-up, beautiful woman whispers to camera "your story awaits on darkcoal.online", soft lips, eye contact, shallow depth, warm light, intimate, 4k'},
+  {name:'Hook — Bedroom Reveal', dur:6, aspect:'16:9', prompt:'slow push-in, luxury bedroom, woman on silk sheets sits up, smiles at camera, warm golden hour, bokeh, inviting, "AI roleplay, your fantasy"'},
+  {name:'Hook — Club Tease', dur:5, aspect:'9:16', prompt:'neon club, woman leans in, winks, whispers "come find me on darkcoal", pink blue neon, shallow depth, anamorphic'},
+  {name:'Fantasy — Tavern', dur:8, aspect:'16:9', prompt:'fantasy tavern, elven beauty by fireplace, looks at camera, magical dust, "your adventure begins"'},
+  {name:'Beach — Sunset Walk', dur:6, aspect:'9:16', prompt:'beach sunset walk, woman turns back to camera, hair in wind, golden light, dreamy, free'},
+  {name:'Cyber — Rain Street', dur:5, aspect:'16:9', prompt:'rainy cyber street at night, woman under neon umbrella, looks back, mysterious, cinematic rain reflections'},
+];
+function renderAds(){const w=$('adsList'); w.innerHTML=''; adPresets.forEach((p,i)=>{const d=document.createElement('div'); d.className='item'; d.style.flexDirection='column'; d.innerHTML=`<div style="display:flex;justify-content:space-between;width:100%"><b style="font-size:12px">${p.name}</b><span class="chip">${p.aspect} · ${p.dur}s</span></div><div class="small" style="margin-top:4px">${p.prompt}</div><button class="btn sm pri" style="margin-top:6px" onclick="useAd(${i})">Load preset</button>`; w.appendChild(d);});}
+function useAd(i){const p=adPresets[i]; $('prompt').value=p.prompt; $('dur').value=p.dur; $('aspect').value=p.aspect; log('preset '+p.name);}
+
+// Active
+function renderActive(){
+  const w=$('active'); w.innerHTML='';
+  active.forEach((r,i)=>{
+    const isImg=r.kind==='image' || r.dataUrl.startsWith('data:image');
+    const prev=isImg?`<img src="${r.dataUrl}" style="width:100%;height:80px;object-fit:cover;border-radius:10px;border:1px solid var(--border)"/>`:`<div style="height:80px;display:grid;place-items:center;background:var(--panel2);border-radius:10px;border:1px solid var(--border);font-size:10px">${r.kind} ${r.name}</div>`;
+    const d=document.createElement('div'); d.style.cssText='border:1px solid var(--border);border-radius:12px;padding:6px;background:var(--panel2)';
+    d.innerHTML=`${prev}<div class="small" style="margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.name}</div><div style="display:flex;gap:4px;margin-top:4px"><button class="btn sm ghost" onclick="moveActive(${i},-1)">↑</button><button class="btn sm ghost" onclick="moveActive(${i},1)">↓</button><button class="btn sm ghost" onclick="rmActive(${i})">×</button></div>`;
+    w.appendChild(d);
+  });
+  $('cnt').textContent=active.length+' / 12'; saveLS('active',active); $('modeLab').textContent = active.length ? 'Ref2VA ('+active.length+' refs)' : 'T2VA (no refs)';
+}
+function clearActive(){active=[]; renderActive();}
+function rmActive(i){active.splice(i,1); renderActive();}
+function moveActive(i,d){const j=i+d; if(j<0||j>=active.length) return; const t=active[i]; active[i]=active[j]; active[j]=t; renderActive();}
+function shuffleActive(){for(let i=active.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); const t=active[i]; active[i]=active[j]; active[j]=t;} renderActive();}
+
+// Workflow
+function buildWf(){
+  const prompt=$('prompt').value; const aspect=$('aspect').value; const dur=parseInt($('dur').value)||5; const width=parseInt($('width').value)||768;
+  let height=width;
+  if(aspect==='16:9') height=Math.round(width*9/16/64)*64;
+  else if(aspect==='9:16') height=Math.round(width*16/9/64)*64;
+  else if(aspect==='1:1') height=width;
+  else if(aspect==='4:3') height=Math.round(width*3/4/64)*64;
+  else if(aspect==='21:9') height=Math.round(width*9/21/64)*64;
+  let seedVal=parseInt($('seed').value); if(isNaN(seedVal)||seedVal===-1) seedVal=Math.floor(Math.random()*2147483647);
+  lastSeed=seedVal; $('seedLab').textContent='seed '+seedVal;
+  const length=Math.round(dur*24);
+  const wf={};
+  wf["3"]={inputs:{unet_name:"MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"},class_type:"UnetLoaderGGUF"};
+  wf["10"]={inputs:{prompt, aspect_ratio:aspect, duration:dur},class_type:"MiniMaxH3Prompt"};
+  wf["15"]={inputs:{width,height,length},class_type:"EmptyH3LatentVideo"};
+  if(active.length){
+    const names=active.filter(r=>r.kind==='image'||r.dataUrl.startsWith('data:image')).map(r=>r.name);
+    if(names.length) wf["20"]={inputs:{images:names},class_type:"LoadImageSet"};
+    wf["25"]={inputs:{model:["3",0], conditioning:["10",0], latent:["15",0], ...(names.length?{reference_images:["20",0]}:{})},class_type:"MiniMaxH3Sampler"};
+  } else {
+    wf["25"]={inputs:{model:["3",0], conditioning:["10",0], latent:["15",0]},class_type:"MiniMaxH3Sampler"};
+  }
+  wf["30"]={inputs:{samples:["25",0], vae:["3",1]},class_type:"VAEDecode"};
+  wf["35"]={inputs:{filename_prefix:"h3_darkcoal_ad", images:["30",0]},class_type:"SaveVideo"};
+  if(!$('useCustom').checked) $('custom').value=JSON.stringify(wf,null,2);
+  return wf;
+}
+function fillCustom(){buildWf(); $('useCustom').checked=true;}
+function fmtCustom(){try{$('custom').value=JSON.stringify(JSON.parse($('custom').value),null,2)}catch(e){log('format '+e.message)}}
+function copyPayload(){const txt=$('useCustom').checked?$('custom').value:JSON.stringify(buildWf(),null,2); navigator.clipboard.writeText(txt).then(()=>log('copied'))}
+function dlPayload(){const wf=$('useCustom').checked?JSON.parse($('custom').value||'{}'):buildWf(); const blob=new Blob([JSON.stringify({input:{workflow:wf}},null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='h3_payload.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000);}
+function rndSeed(){$('seed').value=-1; buildWf();}
+function copyLink(){const pl=btoa(unescape(encodeURIComponent(JSON.stringify({p:$('prompt').value})))); const url=location.href.split('?')[0]+'?q='+pl; navigator.clipboard.writeText(url).then(()=>log('link copied'));}
+(function share(){const q=new URLSearchParams(location.search).get('q'); if(!q) return; try{const o=JSON.parse(decodeURIComponent(escape(atob(q)))); if(o.p) $('prompt').value=o.p;}catch(e){}})();
+
+// Projects
+function saveProj(){
+  const name=$('projName').value.trim()||('ad-'+new Date().toISOString().slice(0,10));
+  const proj={name,prompt:$('prompt').value, neg:$('neg').value, aspect:$('aspect').value, duration:$('dur').value, width:$('width').value, seed:$('seed').value, refs:active, cta:$('cta').value, createdAt:new Date().toISOString()};
+  const list=loadLS('projects',[]); list.unshift(proj); saveLS('projects',list); $('projName').value=''; renderProjs(); log('saved '+name);
+}
+function renderProjs(){
+  const w=$('projList'); w.innerHTML='';
+  const list=loadLS('projects',[]);
+  if(!list.length){w.innerHTML='<div class="small" style="padding:8px;border:1px dashed var(--border);border-radius:10px;text-align:center">No projects — save current pack.</div>'; return;}
+  list.forEach((p,i)=>{
+    const d=document.createElement('div'); d.className='item'; d.style.flexDirection='column';
+    d.innerHTML=`<b style="font-size:11px">${p.name}</b><span class="small">${p.aspect} · ${p.duration}s · ${p.refs.length} refs</span><div style="display:flex;gap:4px;margin-top:6px"><button class="btn sm pri" onclick="loadProj(${i})">load</button><button class="btn sm ghost" onclick="delProj(${i})">×</button></div>`;
+    w.appendChild(d);
+  });
+}
+function loadProj(i){const list=loadLS('projects',[]); const p=list[i]; if(!p) return; $('prompt').value=p.prompt; $('neg').value=p.neg||''; $('aspect').value=p.aspect; $('dur').value=p.duration; $('width').value=p.width; $('seed').value=p.seed; $('cta').value=p.cta||''; active=p.refs||[]; renderActive(); buildWf(); log('loaded '+p.name);}
+function delProj(i){const list=loadLS('projects',[]); list.splice(i,1); saveLS('projects',list); renderProjs();}
+function exportProjs(){const list=loadLS('projects',[]); if(!list.length) return alert('No projects'); const blob=new Blob([JSON.stringify(list,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='darkcoal-h3-projects.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000);}
+function onProjImp(inp){const f=inp.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{try{const arr=JSON.parse(r.result); const cur=loadLS('projects',[]); saveLS('projects',arr.concat(cur)); renderProjs(); log('imported '+arr.length)}catch(e){alert(e.message)}}; r.readAsText(f); inp.value='';}
+function dlProj(){const proj={name:'current', prompt:$('prompt').value, refs:active}; const blob=new Blob([JSON.stringify(proj,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='h3_project.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000);}
+
+// Gallery
+function clearGal(){ $('gallery').innerHTML=''; $('preview').innerHTML='<div class="small" style="padding:28px;text-align:center">Cleared.</div>'; lastSrc=null;}
+function openAll(){ [...document.querySelectorAll('#gallery .tile')].forEach(t=>{const v=t.querySelector('video,img'); if(v) window.open(v.src,'_blank')})}
+function downloadLast(){ if(!lastSrc) return alert('No video'); const a=document.createElement('a'); a.href=lastSrc; a.download='darkcoal_ad.mp4'; a.click();}
+
+// Generate
+async function generate(){
+  const ep=$('ep').value.trim().replace(/\/$/,'');
+  const key=$('key').value.trim();
+  if(!ep||!key) return alert('Set endpoint + key');
+  const btn=$('goBtn'); btn.disabled=true; const t0=performance.now(); status('running…');
+  const timer=setInterval(()=>{$('timer').textContent=((performance.now()-t0)/1000).toFixed(1)+'s'},200);
+  try{
+    let wf; if($('useCustom').checked){ try{wf=JSON.parse($('custom').value)}catch(e){throw new Error('Custom JSON invalid: '+e.message)}} else wf=buildWf();
+    const images=active.map(r=>({name:r.name, image:r.dataUrl.startsWith('data:')?r.dataUrl:'data:image/png;base64,'+r.base64}));
+    const payload={input:{workflow:wf, ...(images.length?{images}:{})}};
+    log('POST '+ep+' nodes='+Object.keys(wf).length+' assets='+images.length);
+    const isSync=ep.endsWith('/runsync')||$('epPath').value==='runsync';
+    let res=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(payload)});
+    if(!res.ok){const t=await res.text(); throw new Error('HTTP '+res.status+': '+t.slice(0,1200));}
+    let data=await res.json();
+    if(!isSync && data.id){
+      const base=ep.replace(/\/run\/?$/,''); const jid=data.id; log('async '+jid+' polling…');
+      for(let i=0;i<180;i++){
+        await new Promise(r=>setTimeout(r,2000));
+        const sr=await fetch(base+'/status/'+jid,{headers:{'Authorization':'Bearer '+key}});
+        if(!sr.ok){const t=await sr.text(); throw new Error('status '+sr.status+': '+t.slice(0,600));}
+        const sd=await sr.json(); const st=sd.status||sd.state;
+        if(st==='COMPLETED' || sd.output){data=sd; break;}
+        if(st==='FAILED'||st==='ERROR') throw new Error('job failed: '+JSON.stringify(sd).slice(0,1400));
+        log('status '+(st||JSON.stringify(sd).slice(0,120)));
+      }
+    }
+    const out=data.output||data; const elapsed=((performance.now()-t0)/1000).toFixed(1); $('timer').textContent=elapsed+'s';
+    if(out.error){ status('error',false); log('ERROR '+JSON.stringify(out,null,2)); alert(out.error); return;}
+    const imgs=out.images||[];
+    if(!imgs.length){ status('no output',false); log('no images/videos '+JSON.stringify(data).slice(0,1400)); return;}
+    status('done '+imgs.length,true); log('got '+imgs.length+' in '+elapsed+'s');
+    const first=imgs[0]; const src=first.type==='s3_url'?first.data:'data:video/mp4;base64,'+first.data; lastSrc=src;
+    const isV=first.filename?.endsWith('.mp4')||first.type==='s3_url'||first.data?.length>50000;
+    $('preview').innerHTML=isV?`<video src="${src}" controls autoplay loop style="width:100%;max-height:520px;background:#000;border-radius:12px"></video>`:`<img src="${src}" style="max-width:100%;max-height:520px"/>`;
+    const gal=$('gallery');
+    imgs.forEach(im=>{
+      const s=im.type==='s3_url'?im.data:'data:video/mp4;base64,'+im.data;
+      const tile=document.createElement('div'); tile.className='tile';
+      const isVideo=im.filename?.endsWith('.mp4')||im.data?.length>50000||im.type==='s3_url';
+      tile.innerHTML=isVideo?`<video src="${s}" muted loop style="width:100%"></video><div class="meta">${im.filename||'video'} · ${im.type}<br/><a href="${s}" download="${im.filename||'video.mp4'}" style="color:#9aa3ff">download</a></div>`:`<img src="${s}"/><div class="meta">${im.filename||'image'} · ${im.type}<br/><a href="${s}" download="${im.filename||'image.png'}" style="color:#9aa3ff">download</a></div>`;
+      if(isVideo) tile.querySelector('video').onclick=()=>{$('preview').innerHTML=`<video src="${s}" controls autoplay loop style="width:100%;max-height:520px"></video>`; lastSrc=s;};
+      else tile.querySelector('img').onclick=()=>{$('preview').innerHTML=`<img src="${s}" style="max-width:100%;max-height:520px"/>`; lastSrc=s;};
+      gal.prepend(tile);
+    });
+  }catch(e){ status('error',false); log('throw '+e.message); alert(e.message);}
+  finally{ clearInterval(timer); $('goBtn').disabled=false; }
+}
+
+initPersist(); renderChars(); renderScenes(); renderBgs(); renderAV(); renderAds(); renderActive(); renderProjs(); buildWf();
+log('ready — create character → upload 2-3 refs → pick scene/ad → generate. Volume needs 20GB, GGUF at /runpod-volume/models/diffusion_models/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf');
+</script>
+</body>
+</html>

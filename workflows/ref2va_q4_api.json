@@ -1,0 +1,9 @@
+{
+  "3": { "inputs": { "unet_name": "MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf" }, "class_type": "UnetLoaderGGUF" },
+  "10": { "inputs": { "prompt": "cinematic ad for darkcoal.online, beautiful woman with auburn hair in luxury bedroom, warm golden light, looking at camera, whispering your story awaits, inviting, shallow depth of field", "aspect_ratio": "16:9", "duration": 5 }, "class_type": "MiniMaxH3Prompt" },
+  "15": { "inputs": { "width": 768, "height": 432, "length": 120 }, "class_type": "EmptyH3LatentVideo" },
+  "20": { "inputs": { "images": ["char_0_0.png", "char_0_1.png"] }, "class_type": "LoadImageSet" },
+  "25": { "inputs": { "model": ["3", 0], "conditioning": ["10", 0], "latent": ["15", 0], "reference_images": ["20", 0] }, "class_type": "MiniMaxH3Sampler" },
+  "30": { "inputs": { "samples": ["25", 0], "vae": ["3", 1] }, "class_type": "VAEDecode" },
+  "35": { "inputs": { "filename_prefix": "h3_darkcoal_ad", "images": ["30", 0] }, "class_type": "SaveVideo" }
+}

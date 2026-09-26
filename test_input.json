@@ -1,0 +1,12 @@
+{
+  "input": {
+    "workflow": {
+      "3": { "inputs": { "unet_name": "MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf" }, "class_type": "UnetLoaderGGUF" },
+      "10": { "inputs": { "prompt": "cinematic ad for AI roleplay platform darkcoal.online, beautiful 24yo woman with shoulder-length auburn hair, green eyes, soft smile, luxury bedroom with warm golden lighting, silk sheets, looking at camera, gentle whisper \"your story awaits\", inviting, 4k, shallow depth of field, 24fps", "aspect_ratio": "16:9", "duration": 5 }, "class_type": "MiniMaxH3Prompt" },
+      "15": { "inputs": { "width": 768, "height": 432, "length": 120 }, "class_type": "EmptyH3LatentVideo" },
+      "25": { "inputs": { "model": ["3", 0], "conditioning": ["10", 0], "latent": ["15", 0] }, "class_type": "MiniMaxH3Sampler" },
+      "30": { "inputs": { "samples": ["25", 0], "vae": ["3", 1] }, "class_type": "VAEDecode" },
+      "35": { "inputs": { "filename_prefix": "h3_darkcoal_ad", "images": ["30", 0] }, "class_type": "SaveVideo" }
+    }
+  }
+}

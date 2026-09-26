@@ -1,0 +1,7 @@
+.git
+.gitignore
+README.md
+playground.html
+POD_BAKE_COMMAND.sh
+__pycache__
+*.pyc
