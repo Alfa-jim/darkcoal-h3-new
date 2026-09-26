@@ -35,9 +35,9 @@ set -e
 # ── Config ───────────────────────────────────────────────────────────────────
 REPO="Abiray/MiniMax-H3-Pruned-GGUF"
 FILE="MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"
-EXPECTED_GB="11.6"
-EXPECTED_BYTES=12460000000          # ~11.6 GiB, allow ±800MB slop for quant variance
-EXPECTED_TOL=800000000
+EXPECTED_GB="10.77"
+EXPECTED_BYTES=11564180576          # exact XET content-length 2026-09-26 (10.77 GiB = 11.56 GB) — single source of truth
+EXPECTED_TOL=200000000              # ±200 MB, tight because we now have exact size
 
 ALT_REPO="unsloth/MiniMax-H3-GGUF"
 ALT_FILE="minimax_h3_ref2va_pruned-Q4_K.gguf"
@@ -53,6 +53,8 @@ fi
 human_gb(){ awk "BEGIN{printf \"%.2f\", $1/1024/1024/1024}"; }
 human_size(){ awk 'function h(x){if(x<1024)return x" B";if(x<1048576)return sprintf("%.1f KB",x/1024);if(x<1073741824)return sprintf("%.1f MB",x/1048576);return sprintf("%.2f GB",x/1073741824)} {print h($1)}' <<< "$1"; }
 has_magic_gguf(){ head -c 4 "$1" 2>/dev/null | grep -q "GGUF"; }
+stat_bytes(){ stat -L -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0; }
+HF_CLI(){ if command -v huggingface-cli >/dev/null 2>&1; then huggingface-cli "$@"; else python3 -m huggingface_hub.commands.huggingface_cli "$@" 2>/dev/null || python -m huggingface_hub.commands.huggingface_cli "$@" || return 127; fi; }
 bar(){
   local pct=$1; local w=28; local filled=$((pct*w/100)); local empty=$((w-filled))
   printf "["
@@ -63,15 +65,20 @@ bar(){
 
 check_one(){
   local path="$1"; local label="$2"
-  if [ -f "$path" ]; then
-    local sz=$(stat -c%s "$path" 2>/dev/null || stat -f%z "$path" 2>/dev/null || echo 0)
+  if [ -e "$path" ]; then
+    local sz=$(stat_bytes "$path")
     local gb=$(human_gb "$sz")
+    local is_link=""; [ -L "$path" ] && is_link="↗ symlink"
     local magic="?"
     has_magic_gguf "$path" && magic="GGUF ✓" || magic="bad header ✗"
     local ok="?"
     if [ "$sz" -gt $((EXPECTED_BYTES - EXPECTED_TOL)) ] && [ "$sz" -lt $((EXPECTED_BYTES + EXPECTED_TOL)) ] && has_magic_gguf "$path"; then ok="${GREEN}VALID${NC}"; else ok="${YELLOW}INCOMPLETE/BAD${NC}"; fi
-    printf "  %-10s %s  %6s GB  %s  → %b\n" "$label" "$(basename "$path")" "$gb" "$magic" "$ok"
-    # also print full path dim
+    # if symlink to valid target, count as VALID even if link size is tiny — follow target
+    if [ -L "$path" ]; then
+      local tsz=$(stat_bytes "$path")
+      if [ "$tsz" -gt $((EXPECTED_BYTES - EXPECTED_TOL)) ] && has_magic_gguf "$path"; then ok="${GREEN}VALID (→ target)${NC}"; fi
+    fi
+    printf "  %-10s %s  %6s GB  %s  → %b %s\n" "$label" "$(basename "$path")" "$gb" "$magic" "$ok" "$is_link"
     echo -e "             ${DIM}$path${NC}"
     return 0
   else
@@ -136,8 +143,8 @@ for p in \
 do
   [ -z "$p" ] && continue
   [ "$p" = "/models/diffusion_models/$FILE" ] && continue
-  if [ -f "$p" ]; then
-    sz=$(stat -c%s "$p" 2>/dev/null || stat -f%z "$p" 2>/dev/null || echo 0)
+  if [ -e "$p" ]; then
+    sz=$(stat_bytes "$p")
     if [ "$sz" -gt $((EXPECTED_BYTES - EXPECTED_TOL)) ] && has_magic_gguf "$p"; then
       FOUND_VALID="$p"
     fi
@@ -164,7 +171,7 @@ done
 echo ""
 
 if [ -n "$FOUND_VALID" ]; then
-  SZ=$(stat -c%s "$FOUND_VALID" 2>/dev/null || stat -f%z "$FOUND_VALID" 2>/dev/null)
+  SZ=$(stat_bytes "$FOUND_VALID")
   echo -e "${GREEN}✔ Found VALID GGUF at: $FOUND_VALID  ($(human_gb "$SZ") GB, GGUF magic OK)${NC}"
   echo -e "${DIM}  Ensuring all symlinks point there (so Serverless at /runpod-volume finds it)...${NC}"
   # Normalize to VOLUME as canonical
@@ -218,8 +225,8 @@ if [ -n "$FOUND_VALID" ]; then
 fi
 
 # If file exists but incomplete, keep it for resume (don't delete yet)
-if [ -f "$TARGET_FILE" ]; then
-  SZ=$(stat -c%s "$TARGET_FILE" 2>/dev/null || stat -f%z "$TARGET_FILE" 2>/dev/null || echo 0)
+if [ -e "$TARGET_FILE" ]; then
+  SZ=$(stat_bytes "$TARGET_FILE")
   GB=$(human_gb "$SZ")
   PCT=$(( SZ*100 / EXPECTED_BYTES ))
   [ "$PCT" -gt 100 ] && PCT=100
@@ -250,9 +257,17 @@ else
   echo -e "\r  ${YELLOW}✔ huggingface_hub ready (hf_transfer not available, will still work)${NC}"
 fi
 export HF_HUB_ENABLE_HF_TRANSFER=1
+# ensure pip bin on PATH (pip --user / PEP668 case) + detect hf cli via python -m
+export PATH="$HOME/.local/bin:$PATH"
+if ! command -v huggingface-cli >/dev/null 2>&1; then
+  if python3 -m huggingface_hub.commands.huggingface_cli --help >/dev/null 2>&1; then
+    huggingface-cli(){ python3 -m huggingface_hub.commands.huggingface_cli "$@"; }
+    export -f huggingface-cli 2>/dev/null || true
+  fi
+fi
 # aria2c check
 if command -v aria2c >/dev/null 2>&1; then echo -e "  ${GREEN}✔ aria2c $(aria2c --version 2>/dev/null | head -1)${NC}"; else echo -e "  ${DIM}○ aria2c not found — will use wget fallback${NC}"; fi
-command -v huggingface-cli >/dev/null 2>&1 && echo -e "  ${GREEN}✔ $(huggingface-cli --version 2>&1 | head -1)${NC}" || echo -e "  ${RED}✗ huggingface-cli missing${NC}"
+if command -v huggingface-cli >/dev/null 2>&1; then echo -e "  ${GREEN}✔ $(huggingface-cli --version 2>&1 | head -1)${NC}"; elif python3 -m huggingface_hub.commands.huggingface_cli --version >/dev/null 2>&1; then echo -e "  ${GREEN}✔ huggingface_hub (python -m) $(python3 -m huggingface_hub.commands.huggingface_cli --version 2>&1 | head -1)${NC}"; else echo -e "  ${RED}✗ huggingface-cli missing (will use wget fallback — still works)${NC}"; fi
 echo ""
 
 # ── Download — with live visual indicator ────────────────────────────────────
@@ -271,17 +286,17 @@ start_live_monitor(){
   (
     local last_sz=0; local last_t=$(date +%s)
     while true; do
-      if [ -f "$target" ]; then
-        local sz=$(stat -c%s "$target" 2>/dev/null || stat -f%z "$target" 2>/dev/null || echo 0)
+      if [ -e "$target" ]; then
+        local sz=$(stat_bytes "$target")
         local pct=$(( sz*100 / EXPECTED_BYTES )); [ "$pct" -gt 100 ] && pct=100
         local gb=$(human_gb "$sz")
         local now=$(date +%s); local dt=$((now - last_t)); [ "$dt" -eq 0 ] && dt=1
         local dsz=$((sz - last_sz)); local speed=$(awk "BEGIN{printf \"%.1f\", $dsz/1024/1024/$dt}")
-        # only print if file is growing or download still running
-        printf "\r  ${CYAN}live:${NC} $(bar "$pct")  ${BOLD}%s${NC}/%s GB  ${DIM}%s MB/s${NC}   " "$gb" "$EXPECTED_GB" "$speed"
+        # use %b + single % escape — no stray %s for printf format injection
+        printf "\r  live: %s  %s/%s GB  %s MB/s   " "$(bar "$pct")" "$gb" "$EXPECTED_GB" "$speed"
         last_sz=$sz; last_t=$now
       else
-        printf "\r  ${DIM}waiting for file ...${NC}          "
+        printf "\r  waiting for file ...          "
       fi
       sleep 1
     done
@@ -296,17 +311,17 @@ stop_live_monitor(){
 # ── Attempt 1: huggingface-cli (fastest, hf_transfer = 2-3x, resumable via xet) ─
 set +e
 HF_EXIT=127
-if command -v huggingface-cli >/dev/null 2>&1; then
+HF_AVAILABLE=0
+if command -v huggingface-cli >/dev/null 2>&1 || python3 -m huggingface_hub.commands.huggingface_cli --help >/dev/null 2>&1; then HF_AVAILABLE=1; fi
+if [ $HF_AVAILABLE -eq 1 ]; then
   echo -e "${GREEN}→ huggingface-cli download (hf_transfer=$HF_HUB_ENABLE_HF_TRANSFER)${NC}"
-  # Start live monitor in parallel
   start_live_monitor "$TARGET_FILE"
-  # huggingface-cli prints its own % bar; we keep our live line underneath for GB/s
-  huggingface-cli download "$REPO" "$FILE" --local-dir "$TARGET_DIR" --local-dir-use-symlinks False 2>&1
+  HF_CLI download "$REPO" "$FILE" --local-dir "$TARGET_DIR" --local-dir-use-symlinks False 2>&1
   HF_EXIT=$?
   stop_live_monitor
   echo ""
-  if [ $HF_EXIT -eq 0 ] && [ -f "$TARGET_FILE" ]; then
-    SZ=$(stat -c%s "$TARGET_FILE" 2>/dev/null || stat -f%z "$TARGET_FILE")
+  if [ $HF_EXIT -eq 0 ] && [ -e "$TARGET_FILE" ]; then
+    SZ=$(stat_bytes "$TARGET_FILE")
     if [ "$SZ" -gt $((EXPECTED_BYTES - EXPECTED_TOL)) ]; then
       echo -e "${GREEN}✔ huggingface-cli finished  ($(human_gb "$SZ") GB)${NC}"
     else
@@ -317,11 +332,11 @@ if command -v huggingface-cli >/dev/null 2>&1; then
     echo -e "${YELLOW}huggingface-cli exit $HF_EXIT — trying fallback resume...${NC}"
   fi
 else
-  echo -e "${YELLOW}huggingface-cli not found — skipping to fallback${NC}"
+  echo -e "${YELLOW}huggingface-cli not found — skipping to fallback (wget will handle resume)${NC}"
 fi
 
 # ── Fallback: aria2c or wget -c (both resume) ───────────────────────────────
-if [ $HF_EXIT -ne 0 ] || [ ! -f "$TARGET_FILE" ]; then
+if [ $HF_EXIT -ne 0 ] || [ ! -e "$TARGET_FILE" ]; then
   URL="https://huggingface.co/$REPO/resolve/main/$FILE"
   echo -e "${GREEN}→ Fallback: direct HTTP resume${NC}"
   echo -e "${DIM}  URL: $URL${NC}"
@@ -369,10 +384,10 @@ if [ ! -f "$TARGET_FILE" ]; then
     exit 1
   fi
 fi
-SZ=$(stat -c%s "$TARGET_FILE" 2>/dev/null || stat -f%z "$TARGET_FILE")
+SZ=$(stat_bytes "$TARGET_FILE")
 GB=$(human_gb "$SZ")
 PCT=$(( SZ*100 / EXPECTED_BYTES )); [ "$PCT" -gt 100 ] && PCT=100
-echo -e "  Size: $GB GB  $(bar "$PCT")  $SZ bytes"
+echo -e "  Size: $GB GB  $(bar "$PCT")  $SZ bytes (expected $EXPECTED_BYTES)"
 ls -lh "$TARGET_FILE" | sed 's/^/  /'
 if has_magic_gguf "$TARGET_FILE"; then
   echo -e "  ${GREEN}✔ GGUF magic 'GGUF' OK${NC}"
@@ -411,15 +426,14 @@ ln -sf "$TARGET_FILE" "$ALT_LINK" 2>/dev/null || true
 
 # ── Optional VAE helpers (tiny, from unsloth — ignore failure) ──────────────
 echo ""
-echo -e "${DIM}Fetching VAE helpers (optional, unsloth) — ignore errors if offline${DIM}"
+echo -e "${DIM}Fetching VAE helpers (optional, unsloth) — ignore errors if offline${NC}"
 mkdir -p "$VOLUME/models/vae" 2>/dev/null || true
-# only fetch if missing
 if [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_fp16.safetensors" ]; then
-  huggingface-cli download unsloth/MiniMax-H3-GGUF vae/minimax_h3_video_vae_fp16.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -3 || true
-else echo -e "${DIM}  vae video already present${DIM}"; fi
+  HF_CLI download unsloth/MiniMax-H3-GGUF vae/minimax_h3_video_vae_fp16.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -3 || true
+else echo -e "${DIM}  vae video already present${NC}"; fi
 if [ ! -f "$VOLUME/models/vae/minimax_h3_audio_vae_fp32.safetensors" ]; then
-  huggingface-cli download unsloth/MiniMax-H3-GGUF vae/minimax_h3_audio_vae_fp32.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -3 || true
-else echo -e "${DIM}  vae audio already present${DIM}"; fi
+  HF_CLI download unsloth/MiniMax-H3-GGUF vae/minimax_h3_audio_vae_fp32.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -3 || true
+else echo -e "${DIM}  vae audio already present${NC}"; fi
 [ -n "$SECONDARY" ] && mkdir -p "$SECONDARY/models/vae" 2>/dev/null || true
 
 # ── Final report ─────────────────────────────────────────────────────────────
