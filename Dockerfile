@@ -46,11 +46,12 @@ RUN uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-
 # sd-cli for H3 GGUF — GPU build fits 24GB/48GB with Q4 11G + Qwen Q2 12G + --offload-to-cpu --backend te=cpu
 # unsloth/MiniMax-H3-GGUF is sd-cli only (ComfyUI GGUF throws Unknown architecture!)
 # MUST be -DSD_CUDA=ON on devel image, otherwise diffusion runs 100% CPU / 2% VRAM and freezes (CPU OOM).
-# Use -j2 to avoid OOM on GH runner (was hanging with -j$(nproc))
+# Previous build SIGILL exit -4 after ggml_cuda_init on RTX A5000 (cc 8.6) -> disable native (-march=native illegal on RunPod host CPU)
+# and force CUDA arch 86, also drop Flash-Attn which triggers SIGILL on 8.6. Use -j2 to avoid OOM on GH runner.
 RUN apt-get update && apt-get install -y build-essential cmake git libgomp1 \
  && git clone --recursive https://github.com/leejet/stable-diffusion.cpp /tmp/sd.cpp \
  && mkdir -p /tmp/sd.cpp/build && cd /tmp/sd.cpp/build \
- && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DSD_VULKAN=OFF -DSD_METAL=OFF \
+ && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DSD_VULKAN=OFF -DSD_METAL=OFF -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES=86 -DGGML_CUDA_FA_ALL_QUANTS=OFF \
  && make -j2 sd-cli \
  && cp bin/sd-cli /usr/local/bin/sd-cli && chmod +x /usr/local/bin/sd-cli \
  && /usr/local/bin/sd-cli --help 2>&1 | head -30 || (echo "sd-cli --help failed but binary exists" && ls -lh /usr/local/bin/sd-cli) \

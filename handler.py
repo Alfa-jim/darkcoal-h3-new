@@ -119,6 +119,9 @@ def run_sd_cli(job_id, prompt, width, height, length, steps, seed, images, negat
     if seed == -1:
         seed = int.from_bytes(os.urandom(4), "little") % 2147483647
 
+    # RTX A5000 24G: --diffusion-fa causes SIGILL exit -4 on cc 8.6 with GGML_NATIVE=ON, disabled by default.
+    # Enable FA only if env H3_FA=1. Keep --backend te=cpu --offload-to-cpu to fit 24G (Q4 11G + Q2 12G).
+    use_fa = os.environ.get("H3_FA", "0") == "1"
     cmd = [
         "sd-cli", "--mode", "vid_gen",
         "--diffusion-model", diff,
@@ -134,9 +137,10 @@ def run_sd_cli(job_id, prompt, width, height, length, steps, seed, images, negat
         "--seed", str(seed),
         "--output", out_path,
         "--backend", "te=cpu",
-        "--diffusion-fa",
         "--offload-to-cpu",
     ]
+    if use_fa:
+        cmd.append("--diffusion-fa")
     # add negative prompt if any (sd-cli may not support, but try)
     if negative_prompt:
         cmd.extend(["--negative-prompt", negative_prompt])
