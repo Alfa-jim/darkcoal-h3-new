@@ -47,7 +47,7 @@ RUN uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-
 # unsloth/MiniMax-H3-GGUF is sd-cli only (ComfyUI GGUF throws Unknown architecture!)
 # Use -j2 to avoid OOM on GH runner (was hanging with -j$(nproc))
 RUN apt-get update && apt-get install -y build-essential cmake git libgomp1 \
- && git clone https://github.com/leejet/stable-diffusion.cpp /tmp/sd.cpp \
+ && git clone --recursive https://github.com/leejet/stable-diffusion.cpp /tmp/sd.cpp \
  && mkdir -p /tmp/sd.cpp/build && cd /tmp/sd.cpp/build \
  && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=OFF -DSD_VULKAN=OFF -DSD_METAL=OFF \
  && make -j2 sd-cli \
