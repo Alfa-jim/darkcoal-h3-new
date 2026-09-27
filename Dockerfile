@@ -45,13 +45,14 @@ RUN uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-
 
 # sd-cli for H3 GGUF — fits 24GB with Q4 11G + Qwen Q2 12G + --offload-to-cpu --backend te=cpu
 # unsloth/MiniMax-H3-GGUF is sd-cli only (ComfyUI GGUF throws Unknown architecture!)
+# Use -j2 to avoid OOM on GH runner (was hanging with -j$(nproc))
 RUN apt-get update && apt-get install -y build-essential cmake git libgomp1 \
  && git clone https://github.com/leejet/stable-diffusion.cpp /tmp/sd.cpp \
  && mkdir -p /tmp/sd.cpp/build && cd /tmp/sd.cpp/build \
- && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=OFF \
- && make -j$(nproc) sd-cli \
+ && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=OFF -DSD_VULKAN=OFF -DSD_METAL=OFF \
+ && make -j2 sd-cli \
  && cp bin/sd-cli /usr/local/bin/sd-cli && chmod +x /usr/local/bin/sd-cli \
- && /usr/local/bin/sd-cli --help 2>&1 | head -20 || echo "sd-cli built" \
+ && /usr/local/bin/sd-cli --help 2>&1 | head -30 || (echo "sd-cli --help failed but binary exists" && ls -lh /usr/local/bin/sd-cli) \
  && rm -rf /tmp/sd.cpp && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # quick CI smoke test (CPU, no model)
