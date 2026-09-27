@@ -449,11 +449,24 @@ async function generate(){
       log('POST(comfy) '+ep+' nodes='+Object.keys(wf).length+' assets='+images.length);
     } else {
       const p=$('prompt').value.trim() || 'a cinematic shot';
-      const W=Math.max(256,Math.min(1024,Math.round(+$('width').value/32)*32)), H=Math.max(256,Math.min(1024,Math.round(+$('height').value/32)*32));
-      const steps=Math.max(4,Math.min(60,+$('steps').value||20));
-      const len=+($('length').value||81); const video_frames=Math.min(len,81);
+      // derive W/H from aspect + width select (768 native), robust to missing height/steps/length inputs
+      let W=parseInt($('width')?.value||768); let aspect=$('aspect')?.value||'16:9'; let H=W;
+      if(aspect==='16:9') H=Math.round(W*9/16/32)*32;
+      else if(aspect==='9:16') H=Math.round(W*16/9/32)*32;
+      else if(aspect==='1:1') H=W;
+      else if(aspect==='4:3') H=Math.round(W*3/4/32)*32;
+      else if(aspect==='21:9') H=Math.round(W*9/21/32)*32;
+      if(Math.min(W,H)>768){ const s=768/Math.min(W,H); W=Math.round(W*s/32)*32; H=Math.round(H*s/32)*32; }
+      W=Math.max(256,Math.min(1024,W)); H=Math.max(256,Math.min(1024,H));
+      const stepsEl=$('steps'); const steps=Math.max(4,Math.min(60, (stepsEl?parseInt(stepsEl.value):20)||20));
+      // length from dur (5s -> 120f -> snap 17k+5) or fallback 81; allow explicit length input if present
+      const lengthEl=$('length'); const durEl=$('dur');
+      let len=81;
+      if(lengthEl) len=parseInt(lengthEl.value)||81;
+      else if(durEl) { const dur=parseInt(durEl.value)||5; const raw=Math.max(5, Math.round(dur*24)); len=raw + (5 - (raw % 17)) % 17; }
+      const video_frames=Math.min(len,81);
       const seed=Math.floor(Math.random()*4294967295);
-      payload={input:{prompt:p, negative_prompt:'', width:W, height:H, video_frames, steps, seed, ...(images.length?{images}:{})}};
+      payload={input:{prompt:p, negative_prompt:($('neg')?.value||''), width:W, height:H, video_frames, steps, seed, ...(images.length?{images}:{})}};
       log('POST(sd-cli) '+ep+' prompt="'+p.slice(0,80)+'" '+W+'x'+H+'x'+video_frames+' steps='+steps+' assets='+images.length);
     }
     const isSync=ep.endsWith('/runsync')||$('epPath').value==='runsync';

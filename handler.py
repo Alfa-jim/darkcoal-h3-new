@@ -142,22 +142,38 @@ def run_sd_cli(job_id, prompt, width, height, length, steps, seed, images, negat
         cmd.extend(["--negative-prompt", negative_prompt])
     cmd.extend(ref_args)
 
-    print(f"[h3 sd-cli] cmd: {' '.join(shlex.quote(c) for c in cmd)}")
+    print(f"[h3 sd-cli] cmd: {' '.join(shlex.quote(c) for c in cmd)}", flush=True)
     start = time.time()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        print(f"[h3 sd-cli] exit {proc.returncode} in {time.time()-start:.1f}s")
-        print(f"[h3 sd-cli] stdout: {proc.stdout[-2000:]}")
-        print(f"[h3 sd-cli] stderr: {proc.stderr[-2000:]}")
-        if proc.returncode != 0:
-            return {"error": f"sd-cli failed exit {proc.returncode}", "details": [proc.stdout[-2000:], proc.stderr[-2000:]]}
+        # Stream so RunPod logs don't appear frozen (CPU 100% with buffered capture_output shows nothing until exit/OOM)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        out_buf = []
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                out_buf.append(line)
+                print(f"[sd-cli] {line}", flush=True)
+                # keep last ~4000 chars for error reporting
+                if len(out_buf) > 500:
+                    out_buf = out_buf[-400:]
+        except Exception as e:
+            print(f"[h3 sd-cli] stream read err {e}", flush=True)
+        try:
+            ret = proc.wait(timeout=900)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return {"error": "sd-cli timeout 900s (GPU build should finish 768p/5s in ~120-180s; CPU-only hangs)"}
+        print(f"[h3 sd-cli] exit {ret} in {time.time()-start:.1f}s", flush=True)
+        tail = "\n".join(out_buf[-80:])
+        if ret != 0:
+            return {"error": f"sd-cli failed exit {ret}", "details": [tail]}
         if not os.path.exists(out_path):
             # sd-cli may output .webm or with suffix
             cands = [p for p in os.listdir(tmpdir) if p.endswith((".mp4",".webm",".mkv"))]
             if cands:
                 out_path = os.path.join(tmpdir, cands[0])
             else:
-                return {"error": "sd-cli produced no output", "details": [proc.stdout[-2000:]]}
+                return {"error": "sd-cli produced no output", "details": [tail]}
         # read output
         with open(out_path, "rb") as f:
             data = f.read()
@@ -174,10 +190,8 @@ def run_sd_cli(job_id, prompt, width, height, length, steps, seed, images, negat
                 print(f"[h3 sd-cli] S3 err {e}")
         b64 = base64.b64encode(data).decode()
         return {"images": [{"filename": os.path.basename(out_path), "type": "base64", "data": b64}]}
-    except subprocess.TimeoutExpired:
-        return {"error": "sd-cli timeout 600s"}
     except FileNotFoundError:
-        return {"error": "sd-cli binary not found — image needs rebuild with stable-diffusion.cpp"}
+        return {"error": "sd-cli binary not found — image needs rebuild with stable-diffusion.cpp (needs -DSD_CUDA=ON devel image)"}
     finally:
         # cleanup refs but keep output for debugging if needed
         pass

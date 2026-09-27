@@ -4,7 +4,7 @@
 # Both are same architecture (Wan) — ComfyUI-GGUF UnetLoaderGGUF loads either.
 # Network Volume: 20GB (11.6GB file + HF temp). Image does NOT bake the GGUF.
 
-ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 ARG COMFYUI_VERSION=0.33.1
@@ -43,13 +43,14 @@ RUN uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-
  && for r in /comfyui/custom_nodes/*/requirements.txt; do [ -f "$r" ] && uv pip install -r "$r" || true; done \
  && uv pip install "transformers>=4.50.3,<5" "huggingface-hub<1.0"
 
-# sd-cli for H3 GGUF — fits 24GB with Q4 11G + Qwen Q2 12G + --offload-to-cpu --backend te=cpu
+# sd-cli for H3 GGUF — GPU build fits 24GB/48GB with Q4 11G + Qwen Q2 12G + --offload-to-cpu --backend te=cpu
 # unsloth/MiniMax-H3-GGUF is sd-cli only (ComfyUI GGUF throws Unknown architecture!)
+# MUST be -DSD_CUDA=ON on devel image, otherwise diffusion runs 100% CPU / 2% VRAM and freezes (CPU OOM).
 # Use -j2 to avoid OOM on GH runner (was hanging with -j$(nproc))
 RUN apt-get update && apt-get install -y build-essential cmake git libgomp1 \
  && git clone --recursive https://github.com/leejet/stable-diffusion.cpp /tmp/sd.cpp \
  && mkdir -p /tmp/sd.cpp/build && cd /tmp/sd.cpp/build \
- && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=OFF -DSD_VULKAN=OFF -DSD_METAL=OFF \
+ && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DSD_VULKAN=OFF -DSD_METAL=OFF \
  && make -j2 sd-cli \
  && cp bin/sd-cli /usr/local/bin/sd-cli && chmod +x /usr/local/bin/sd-cli \
  && /usr/local/bin/sd-cli --help 2>&1 | head -30 || (echo "sd-cli --help failed but binary exists" && ls -lh /usr/local/bin/sd-cli) \
