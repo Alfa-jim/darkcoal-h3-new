@@ -32,12 +32,9 @@ except Exception as e:
 fi
 echo "[h3] GPU $GPU_MSG"
 
-# ── ComfyUI-Manager offline ──
-comfy-manager-set-mode offline 2>/dev/null || true
-
-# ── Pod compat: Pod volume at /workspace, Serverless at /runpod-volume  ──
-# User instruction: POD bakes into /workspace, Serverless reads /runpod-volume
-# So we symlink /workspace/models -> /runpod-volume/models if needed
+# ── Network Volume dirs (sd-cli only) ──
+mkdir -p /runpod-volume/models/diffusion_models /runpod-volume/models/text_encoders /runpod-volume/models/vae
+mkdir -p /workspace/models/diffusion_models /workspace/models/text_encoders /workspace/models/vae
 if [ ! -d /runpod-volume/models ] && [ -d /workspace/models ]; then
   echo "[h3] Pod compat: linking /workspace/models -> /runpod-volume/models" >&2
   mkdir -p /runpod-volume
@@ -46,51 +43,23 @@ if [ ! -d /runpod-volume/models ] && [ -d /workspace/models ]; then
     bn=$(basename "$d")
     [ -e "/runpod-volume/models/$bn" ] || ln -s "$d" "/runpod-volume/models/$bn" 2>/dev/null || true
   done
-  [ -e /runpod-volume/models ] || ln -s /workspace/models /runpod-volume/models 2>/dev/null || true
 fi
-mkdir -p /runpod-volume/models/diffusion_models /runpod-volume/models/unet
-# ── FIX: ComfyUI main.py execute_prestartup_script() does os.listdir() on every
-#    custom_nodes path from extra_model_paths.yaml and crashes with
-#    FileNotFoundError if /runpod-volume/custom_nodes (or input/output) doesn't exist.
-#    Network Volume starts empty — these dirs don't exist until we create them.
-#    Must run BEFORE python -u /comfyui/main.py. See worker logs:
-#    FileNotFoundError: [Errno 2] No such file or directory: '/runpod-volume/custom_nodes'
-mkdir -p /runpod-volume/custom_nodes /runpod-volume/input /runpod-volume/output
-mkdir -p /runpod-volume/models/embeddings /runpod-volume/models/checkpoints /runpod-volume/models/text_encoders /runpod-volume/models/clip_vision /runpod-volume/models/configs /runpod-volume/models/controlnet /runpod-volume/models/vae /runpod-volume/models/loras /runpod-volume/models/upscale_models
 echo "[h3] Network Volume dirs ready:"
-ls -ld /runpod-volume/custom_nodes /runpod-volume/input /runpod-volume/output /runpod-volume/models/diffusion_models 2>&1 | sed 's/^/  /'
+ls -ld /runpod-volume/models/diffusion_models /runpod-volume/models/text_encoders /runpod-volume/models/vae 2>&1 | sed 's/^/  /'
 
 # ── Show GGUF status ──
-GGUF_PRUNED="/runpod-volume/models/diffusion_models/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"
-GGUF_UNSLOTH="/runpod-volume/models/diffusion_models/minimax_h3_ref2va_pruned-Q4_K.gguf"
 echo "[h3] Checking GGUF..."
-if [ -f "$GGUF_PRUNED" ]; then
-  echo "  ✓ $GGUF_PRUNED ($(du -h "$GGUF_PRUNED" | cut -f1))"
-elif [ -f "$GGUF_UNSLOTH" ]; then
-  echo "  ✓ $GGUF_UNSLOTH ($(du -h "$GGUF_UNSLOTH" | cut -f1))"
-else
-  echo "  ✗ NOT FOUND — expected one of:"
-  echo "      $GGUF_PRUNED  (Abiray Q4_K_M 11.6GB)"
-  echo "      $GGUF_UNSLOTH  (unsloth Q4_K)"
-  echo "    Run POD_BAKE_COMMAND.sh on a Pod with the same Network Volume attached!"
-  if [ -f "/runpod-volume/models/unet/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf" ]; then
-    echo "  ✓ fallback /runpod-volume/models/unet/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf"
-  fi
-  ls -lh /runpod-volume/models/diffusion_models/ 2>&1 | head -20 || true
-fi
+for p in /runpod-volume/models/diffusion_models/minimax_h3_ref2va_pruned-Q4_K.gguf /workspace/models/diffusion_models/minimax_h3_ref2va_pruned-Q4_K.gguf /runpod-volume/models/diffusion_models/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf; do [ -f "$p" ] && echo "  ✓ diffusion $p ($(du -h "$p"|cut -f1))" && break; done
+for p in /runpod-volume/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf /workspace/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf; do [ -f "$p" ] && echo "  ✓ llm Q2 $p ($(du -h "$p"|cut -f1))" && break; done
+for p in /runpod-volume/models/vae/minimax_h3_video_vae_fp16.safetensors /runpod-volume/models/vae/minimax_h3_video_vae_int8_convrot.safetensors; do [ -f "$p" ] && echo "  ✓ vae $p ($(du -h "$p"|cut -f1))" && break; done
+ls -lh /runpod-volume/models/diffusion_models/ /runpod-volume/models/text_encoders/ 2>&1 | head -20 || true
+echo "[h3] sd-cli $(/usr/local/bin/sd-cli --help 2>&1 | head -1 || echo 'binary ready')"
 
-echo "[h3] Starting ComfyUI..."
-: "${COMFY_LOG_LEVEL:=DEBUG}"
-PIDFILE="/tmp/comfyui.pid"
-
+# ── sd-cli ONLY — no ComfyUI (saves 2-3G VRAM, 60s boot) ──
 if [ "$SERVE_API_LOCALLY" = "true" ]; then
-  python -u /comfyui/main.py --disable-auto-launch --disable-metadata --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
-  echo $! > "$PIDFILE"
-  echo "[h3] RunPod handler (local API)..."
+  echo "[h3] RunPod handler (local API, sd-cli only)..."
   python -u /handler.py --rp_serve_api --rp_api_host=0.0.0.0
 else
-  python -u /comfyui/main.py --disable-auto-launch --disable-metadata --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
-  echo $! > "$PIDFILE"
-  echo "[h3] RunPod handler..."
+  echo "[h3] RunPod handler (sd-cli only)..."
   python -u /handler.py
 fi
