@@ -1,8 +1,9 @@
 """
 darkcoal-h3-new - RunPod Serverless handler for MiniMax H3
-Supports BOTH:
-- sd-cli --mode vid_gen (GGUF Q4 11G + Qwen Q2 12G, fits 24GB, --offload-to-cpu --backend te=cpu)  [PRIMARY for H3]
-- ComfyUI fallback (UNETLoader FP8 19.5G) if workflow supplied
+Abiray RELIGION https://huggingface.co/Abiray/MiniMax-H3-Pruned-GGUF
+Supports BOTH (ComfyUI is PRIMARY):
+- ComfyUI UnetLoaderGGUF MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf 11.6G=16GB / Q5_K_M 14.1G=24GB  [PRIMARY]
+- sd-cli fallback unsloth 99G budget (OOM on 24G) kept only for compat — Abiray ComfyUI is the religion
 """
 import base64, json, os, subprocess, tempfile, time, traceback, uuid, logging, shlex
 import requests, websocket, runpod
