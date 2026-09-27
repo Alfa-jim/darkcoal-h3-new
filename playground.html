@@ -458,16 +458,18 @@ async function generate(){
     let res=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(payload)});
     if(!res.ok){const t=await res.text(); throw new Error('HTTP '+res.status+': '+t.slice(0,1200));}
     let data=await res.json();
-    if(!isSync && data.id){
-      const base=ep.replace(/\/run\/?$/,''); const jid=data.id; log('async '+jid+' polling…');
-      for(let i=0;i<180;i++){
+    // runsync returns IN_QUEUE if >90s (H3 needs 11min) — must poll even for sync
+    const needsPoll = data.id && (data.status==='IN_QUEUE' || data.status==='IN_PROGRESS' || (!data.output && !data.images));
+    if(needsPoll){
+      const base=ep.replace(/\/runsync\/?$/,'').replace(/\/run\/?$/,''); const jid=data.id; log((isSync?'sync-queued ':'async ')+jid+' polling 11min…');
+      for(let i=0;i<540;i++){ // 540*2s = 18min > H3 11min
         await new Promise(r=>setTimeout(r,2000));
         const sr=await fetch(base+'/status/'+jid,{headers:{'Authorization':'Bearer '+key}});
         if(!sr.ok){const t=await sr.text(); throw new Error('status '+sr.status+': '+t.slice(0,600));}
         const sd=await sr.json(); const st=sd.status||sd.state;
         if(st==='COMPLETED' || sd.output){data=sd; break;}
         if(st==='FAILED'||st==='ERROR') throw new Error('job failed: '+JSON.stringify(sd).slice(0,1400));
-        log('status '+(st||JSON.stringify(sd).slice(0,120)));
+        if(i%15===0) log('status '+(st||JSON.stringify(sd).slice(0,120))+' '+(i*2)+'s');
       }
     }
     const out=data.output||data; const elapsed=((performance.now()-t0)/1000).toFixed(1); $('timer').textContent=elapsed+'s';
