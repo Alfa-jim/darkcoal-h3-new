@@ -250,8 +250,8 @@ def handler(job):
     import requests, websocket, uuid, urllib.parse
     workflow = validated["workflow"]
     input_images = validated.get("images")
-    if not check_server(f"http://{COMFY_HOST}/", 0, 50):
-        return {"error": f"ComfyUI server ({COMFY_HOST}) not reachable"}
+    if not check_server(f"http://{COMFY_HOST}/", 600, 500):
+        return {"error": f"ComfyUI server ({COMFY_HOST}) not reachable after 300s cold start"}
     # upload images
     if input_images:
         for im in input_images:
@@ -285,7 +285,8 @@ def handler(job):
             return {"error": f"Missing prompt_id in {qd}"}
         # wait via websocket (simplified polling)
         ws = websocket.WebSocket()
-        ws.connect(f"ws://{COMFY_HOST}/ws?clientId={client_id}", timeout=10)
+        ws.connect(f"ws://{COMFY_HOST}/ws?clientId={client_id}", timeout=60)
+        ws.settimeout(900)
         done = False
         while True:
             out = ws.recv()
