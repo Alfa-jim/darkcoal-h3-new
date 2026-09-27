@@ -441,10 +441,21 @@ async function generate(){
   const btn=$('goBtn'); btn.disabled=true; const t0=performance.now(); status('running…');
   const timer=setInterval(()=>{$('timer').textContent=((performance.now()-t0)/1000).toFixed(1)+'s'},200);
   try{
-    let wf; if($('useCustom').checked){ try{wf=JSON.parse($('custom').value)}catch(e){throw new Error('Custom JSON invalid: '+e.message)}} else wf=buildWf();
+    let payload;
     const images=active.map(r=>({name:r.name, image:r.dataUrl.startsWith('data:')?r.dataUrl:'data:image/png;base64,'+r.base64}));
-    const payload={input:{workflow:wf, ...(images.length?{images}:{})}};
-    log('POST '+ep+' nodes='+Object.keys(wf).length+' assets='+images.length);
+    if($('useCustom').checked){
+      let wf; try{wf=JSON.parse($('custom').value)}catch(e){throw new Error('Custom JSON invalid: '+e.message)}
+      payload={input:{workflow:wf, ...(images.length?{images}:{})}};
+      log('POST(comfy) '+ep+' nodes='+Object.keys(wf).length+' assets='+images.length);
+    } else {
+      const p=$('prompt').value.trim() || 'a cinematic shot';
+      const W=Math.max(256,Math.min(1024,Math.round(+$('width').value/32)*32)), H=Math.max(256,Math.min(1024,Math.round(+$('height').value/32)*32));
+      const steps=Math.max(4,Math.min(60,+$('steps').value||20));
+      const len=+($('length').value||81); const video_frames=Math.min(len,81);
+      const seed=Math.floor(Math.random()*4294967295);
+      payload={input:{prompt:p, negative_prompt:'', width:W, height:H, video_frames, steps, seed, ...(images.length?{images}:{})}};
+      log('POST(sd-cli) '+ep+' prompt="'+p.slice(0,80)+'" '+W+'x'+H+'x'+video_frames+' steps='+steps+' assets='+images.length);
+    }
     const isSync=ep.endsWith('/runsync')||$('epPath').value==='runsync';
     let res=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(payload)});
     if(!res.ok){const t=await res.text(); throw new Error('HTTP '+res.status+': '+t.slice(0,1200));}

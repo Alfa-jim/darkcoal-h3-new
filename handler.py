@@ -1,19 +1,18 @@
 """
-darkcoal-h3-new — RunPod Serverless handler for MiniMax H3 (Ref2VA Q4 Pruned) via ComfyUI
-- Supports T2VA (no refs) and Ref2VA (up to 9 images / 3 videos / 3 audios, max 12 assets)
-- Uses ComfyUI websocket + /prompt + /history + /view (same proven pattern as darkcoal-qwen-fast)
-- Returns gifs/videos/audio/images unified as base64 or S3 (if BUCKET_ENDPOINT_URL set)
+darkcoal-h3-new — RunPod Serverless handler for MiniMax H3
+Supports BOTH:
+- sd-cli --mode vid_gen (GGUF Q4 11G + Qwen Q2 12G, fits 24GB, --offload-to-cpu --backend te=cpu)  [PRIMARY for H3]
+- ComfyUI fallback (UNETLoader FP8 19.5G) if workflow supplied
 """
-import base64, json, os, socket, tempfile, time, traceback, urllib.parse, uuid, logging
+import base64, json, os, subprocess, tempfile, time, traceback, uuid, logging, shlex
 import requests, websocket, runpod
 from runpod.serverless.utils import rp_upload
 from io import BytesIO
-# src layout differs between build flatten (ADD src/... ./) and proper src/ dir — handle both + no-src fallback
 try:
-    from src.network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics  # type: ignore
+    from src.network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics
 except ImportError:
     try:
-        from network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics  # type: ignore
+        from network_volume import is_network_volume_debug_enabled, run_network_volume_diagnostics
     except ImportError:
         def is_network_volume_debug_enabled(): return False
         def run_network_volume_diagnostics(): return None
@@ -21,284 +20,299 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 COMFY_HOST = "127.0.0.1:8188"
 COMFY_PID_FILE = "/tmp/comfyui.pid"
-COMFY_INTERVAL_MS = int(os.environ.get("COMFY_API_AVAILABLE_INTERVAL_MS", "50"))
-COMFY_MAX_RETRIES = int(os.environ.get("COMFY_API_AVAILABLE_MAX_RETRIES", "0"))
-COMFY_FALLBACK = 500
-WS_RECONNECT_ATTEMPTS = int(os.environ.get("WEBSOCKET_RECONNECT_ATTEMPTS", "5"))
-WS_RECONNECT_DELAY = int(os.environ.get("WEBSOCKET_RECONNECT_DELAY_S", "3"))
-if os.environ.get("WEBSOCKET_TRACE","false").lower()=="true":
-    websocket.enableTrace(True)
 
-def _comfy_status():
-    try:
-        r=requests.get(f"http://{COMFY_HOST}/",timeout=5)
-        return {"reachable": r.status_code==200, "status_code": r.status_code}
-    except Exception as e:
-        return {"reachable": False, "error": str(e)}
+# sd-cli paths — Pod /workspace == Serverless /runpod-volume (same volume)
+CANDIDATE_BASES = ["/runpod-volume", "/workspace", "/comfyui"]
+def _find(p):
+    for b in CANDIDATE_BASES:
+        fp = os.path.join(b, p)
+        if os.path.exists(fp):
+            return fp
+    # fallback to first
+    return os.path.join(CANDIDATE_BASES[0], p)
 
-def _attempt_ws_reconnect(ws_url, max_attempts, delay_s, initial_error):
-    print(f"[h3] ws closed: {initial_error} — reconnecting...")
-    last=initial_error
-    for attempt in range(max_attempts):
-        st=_comfy_status()
-        if not st["reachable"]:
-            print(f"[h3] ComfyUI HTTP down, abort ws reconnect: {st.get('error')}")
-            raise websocket.WebSocketConnectionClosedException("ComfyUI HTTP unreachable")
-        print(f"[h3] ws reconnect {attempt+1}/{max_attempts} (HTTP {st.get('status_code')})")
-        try:
-            ws2=websocket.WebSocket(); ws2.connect(ws_url,timeout=10)
-            print("[h3] ws reconnected")
-            return ws2
-        except (websocket.WebSocketException, ConnectionRefusedError, socket.timeout, OSError) as e:
-            last=e; print(f"[h3] reconnect {attempt+1} failed: {e}")
-            if attempt < max_attempts-1: time.sleep(delay_s)
-    raise websocket.WebSocketConnectionClosedException(f"reconnect failed: {last}")
+DIFFUSION_GGUF = _find("models/diffusion_models/minimax_h3_ref2va_pruned-Q4_K.gguf")
+DIFFUSION_GGUF_ALT = _find("models/diffusion_models/MiniMax-H3-Ref2VA-Pruned-Q4_K_M.gguf")
+LLM_GGUF_Q2 = _find("models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf")
+LLM_GGUF_Q4 = _find("models/text_encoders/qwen3vl_32b_minimax_h3-Q4_K_M.gguf")
+LLM_SAFETENSORS = _find("models/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+VAE_VIDEO = _find("models/vae/minimax_h3_video_vae_fp16.safetensors")
+VAE_VIDEO_INT8 = _find("models/vae/minimax_h3_video_vae_int8_convrot.safetensors")
+VAE_AUDIO = _find("models/vae/minimax_h3_audio_vae_fp32.safetensors")
+
+def _pick_diffusion():
+    for p in [DIFFUSION_GGUF, DIFFUSION_GGUF_ALT, "/workspace/models/diffusion_models/minimax_h3_ref2va_pruned-Q4_K.gguf", "/runpod-volume/models/diffusion_models/minimax_h3_ref2va_pruned-Q4_K.gguf"]:
+        if os.path.exists(p):
+            return p
+    return DIFFUSION_GGUF
+
+def _pick_llm():
+    # sd-cli needs GGUF Qwen — prefer Q2 (fits 24GB), fallback Q4, fallback safetensors (won't work with sd-cli but for ComfyUI)
+    for p in [LLM_GGUF_Q2, LLM_GGUF_Q4, "/workspace/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf", "/runpod-volume/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf"]:
+        if os.path.exists(p):
+            return p
+    # if no GGUF, return Q2 path anyway (will error clearly)
+    return LLM_GGUF_Q2
+
+def _pick_vae():
+    for p in [VAE_VIDEO, VAE_VIDEO_INT8, "/workspace/models/vae/minimax_h3_video_vae_fp16.safetensors", "/runpod-volume/models/vae/minimax_h3_video_vae_fp16.safetensors"]:
+        if os.path.exists(p):
+            return p
+    return VAE_VIDEO
 
 def validate_input(inp):
-    if inp is None: return None, "Please provide input"
-    if isinstance(inp,str):
-        try: inp=json.loads(inp)
-        except: return None, "Invalid JSON"
-    wf=inp.get("workflow")
-    if wf is None: return None, "Missing 'workflow' parameter"
-    images=inp.get("images")
-    if images is not None:
-        if not isinstance(images,list) or not all("name" in x and "image" in x for x in images):
-            return None, "'images' must be list of {name,image}"
-    return {"workflow":wf,"images":images,"comfy_org_api_key": inp.get("comfy_org_api_key")}, None
+    if inp is None:
+        return None, "Please provide input"
+    if isinstance(inp, str):
+        try:
+            inp = json.loads(inp)
+        except:
+            return None, "Invalid JSON"
+    # sd-cli path: prompt-based (playground sends video_frames, accept both)
+    if "prompt" in inp:
+        _len = inp.get("length", inp.get("video_frames", 81))
+        return {"mode": "sd-cli", "prompt": inp.get("prompt",""), "width": int(inp.get("width",768)), "height": int(inp.get("height",432)), "length": int(_len), "steps": int(inp.get("steps",20)), "seed": int(inp.get("seed",-1)), "images": inp.get("images"), "negative_prompt": inp.get("negative_prompt","")}, None
+    # ComfyUI fallback
+    wf = inp.get("workflow")
+    if wf is None:
+        return None, "Missing 'workflow' or 'prompt' parameter"
+    images = inp.get("images")
+    if images is not None and not isinstance(images, list):
+        return None, "'images' must be list"
+    return {"mode": "comfyui", "workflow": wf, "images": images, "comfy_org_api_key": inp.get("comfy_org_api_key")}, None
 
-def _get_pid():
-    try: return int(open(COMFY_PID_FILE).read().strip())
-    except: return None
-def _is_alive():
-    pid=_get_pid()
-    if pid is None: return None
-    try: os.kill(pid,0); return True
-    except ProcessLookupError: return False
-    except PermissionError: return True
+def run_sd_cli(job_id, prompt, width, height, length, steps, seed, images, negative_prompt=""):
+    # check models
+    diff = _pick_diffusion()
+    llm = _pick_llm()
+    vae = _pick_vae()
+    vae_audio = VAE_AUDIO if os.path.exists(VAE_AUDIO) else _find("models/vae/minimax_h3_audio_vae_fp32.safetensors")
+    missing = []
+    for p, name in [(diff, "diffusion"), (llm, "llm Qwen"), (vae, "vae video"), (vae_audio, "vae audio")]:
+        if not os.path.exists(p):
+            missing.append(f"{name} missing: {p}")
+    if missing:
+        return {"error": "Missing models for sd-cli: " + "; ".join(missing) + ". Run POD_BAKE_COMMAND.sh or wget the GGUFs."}
+
+    # prepare refs — sd-cli expects image paths via --image or --ref? For H3 ref2va, sd-cli takes --image for reference
+    # We write images to temp dir and pass as --image /tmp/ref0.png --image /tmp/ref1.png
+    tmpdir = tempfile.mkdtemp(prefix="h3_")
+    ref_args = []
+    if images:
+        for i, im in enumerate(images[:9]):
+            try:
+                name = im.get("name", f"ref_{i}.png")
+                uri = im.get("image", "")
+                b64 = uri.split(",",1)[1] if "," in uri else uri
+                blob = base64.b64decode(b64)
+                ext = os.path.splitext(name)[1] or ".png"
+                fp = os.path.join(tmpdir, f"ref_{i}{ext}")
+                with open(fp, "wb") as f:
+                    f.write(blob)
+                ref_args.extend(["--image", fp])
+            except Exception as e:
+                print(f"[h3 sd-cli] ref {i} write err {e}")
+
+    # sd-cli output
+    out_path = os.path.join(tmpdir, "out.mp4")
+    # seed handling: sd-cli --seed -1 random
+    if seed == -1:
+        seed = int.from_bytes(os.urandom(4), "little") % 2147483647
+
+    cmd = [
+        "sd-cli", "--mode", "vid_gen",
+        "--diffusion-model", diff,
+        "--llm", llm,
+        "--vae", vae,
+        "--audio-vae", vae_audio,
+        "--prompt", prompt,
+        "--width", str(width),
+        "--height", str(height),
+        "--video-frames", str(length),
+        "--steps", str(steps),
+        "--cfg-scale", "1.0",
+        "--seed", str(seed),
+        "--output", out_path,
+        "--backend", "te=cpu",
+        "--diffusion-fa",
+        "--offload-to-cpu",
+    ]
+    # add negative prompt if any (sd-cli may not support, but try)
+    if negative_prompt:
+        cmd.extend(["--negative-prompt", negative_prompt])
+    cmd.extend(ref_args)
+
+    print(f"[h3 sd-cli] cmd: {' '.join(shlex.quote(c) for c in cmd)}")
+    start = time.time()
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        print(f"[h3 sd-cli] exit {proc.returncode} in {time.time()-start:.1f}s")
+        print(f"[h3 sd-cli] stdout: {proc.stdout[-2000:]}")
+        print(f"[h3 sd-cli] stderr: {proc.stderr[-2000:]}")
+        if proc.returncode != 0:
+            return {"error": f"sd-cli failed exit {proc.returncode}", "details": [proc.stdout[-2000:], proc.stderr[-2000:]]}
+        if not os.path.exists(out_path):
+            # sd-cli may output .webm or with suffix
+            cands = [p for p in os.listdir(tmpdir) if p.endswith((".mp4",".webm",".mkv"))]
+            if cands:
+                out_path = os.path.join(tmpdir, cands[0])
+            else:
+                return {"error": "sd-cli produced no output", "details": [proc.stdout[-2000:]]}
+        # read output
+        with open(out_path, "rb") as f:
+            data = f.read()
+        # S3 vs base64
+        if os.environ.get("BUCKET_ENDPOINT_URL"):
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+                    tf.write(data)
+                    tfp = tf.name
+                url = rp_upload.upload_image(job_id, tfp)
+                os.remove(tfp)
+                return {"images": [{"filename": os.path.basename(out_path), "type": "s3_url", "data": url}]}
+            except Exception as e:
+                print(f"[h3 sd-cli] S3 err {e}")
+        b64 = base64.b64encode(data).decode()
+        return {"images": [{"filename": os.path.basename(out_path), "type": "base64", "data": b64}]}
+    except subprocess.TimeoutExpired:
+        return {"error": "sd-cli timeout 600s"}
+    except FileNotFoundError:
+        return {"error": "sd-cli binary not found — image needs rebuild with stable-diffusion.cpp"}
+    finally:
+        # cleanup refs but keep output for debugging if needed
+        pass
+
+# --- ComfyUI fallback (kept for compatibility) ---
+COMFY_HOST = "127.0.0.1:8188"
+COMFY_PID_FILE = "/tmp/comfyui.pid"
+def _comfy_alive():
+    try:
+        pid = int(open(COMFY_PID_FILE).read().strip())
+        os.kill(pid, 0)
+        return True
+    except:
+        return False
 
 def check_server(url, retries=0, delay=50):
+    import requests as req
     print(f"[h3] Checking ComfyUI at {url}...")
-    delay=max(1,delay)
-    log_every=max(1,int(10000/delay)); attempt=0
+    attempt = 0
     while True:
-        alive=_is_alive()
-        if alive is False:
-            print("[h3] ComfyUI process exited — not reachable"); return False
         try:
-            r=requests.get(url,timeout=5)
-            if r.status_code==200:
-                print("[h3] ComfyUI reachable"); return True
-        except: pass
-        attempt+=1
-        fallback=retries if retries>0 else COMFY_FALLBACK
-        if alive is None and attempt>=fallback:
-            print(f"[h3] not reachable after {fallback} tries (no PID file)"); return False
-        if attempt % log_every==0:
-            print(f"[h3] still waiting {(attempt*delay)/1000:.0f}s attempt {attempt}")
+            r = req.get(url, timeout=5)
+            if r.status_code == 200:
+                print("[h3] ComfyUI reachable")
+                return True
+        except:
+            pass
+        attempt += 1
+        fallback = retries if retries > 0 else 500
+        if _comfy_alive() is False:
+            print("[h3] ComfyUI exited")
+            return False
+        if attempt >= fallback:
+            return False
         time.sleep(delay/1000)
-
-def upload_images(images):
-    if not images: return {"status":"success","message":"no images","details":[]}
-    print(f"[h3] uploading {len(images)} assets...")
-    errs=[]; oks=[]
-    for im in images:
-        try:
-            name=im["name"]; uri=im["image"]
-            b64=uri.split(",",1)[1] if "," in uri else uri
-            blob=base64.b64decode(b64)
-            # use image/png for compat; Comfy accepts any
-            files={"image":(name, BytesIO(blob), "image/png"), "overwrite":(None,"true")}
-            r=requests.post(f"http://{COMFY_HOST}/upload/image",files=files,timeout=30)
-            r.raise_for_status()
-            oks.append(f"ok {name}"); print(f"[h3] uploaded {name}")
-        except Exception as e:
-            msg=f"{im.get('name','?')}: {e}"; print(f"[h3] upload err {msg}"); errs.append(msg)
-    if errs: return {"status":"error","message":"some uploads failed","details":errs}
-    return {"status":"success","message":"all uploaded","details":oks}
-
-def get_available_models():
-    try:
-        r=requests.get(f"http://{COMFY_HOST}/object_info",timeout=10); r.raise_for_status()
-        oi=r.json()
-        if "CheckpointLoaderSimple" in oi:
-            ckpt=oi["CheckpointLoaderSimple"]["input"]["required"].get("ckpt_name")
-            if ckpt: return {"checkpoints": ckpt[0] if isinstance(ckpt[0],list) else []}
-    except Exception as e:
-        print(f"[h3] get_available_models warn {e}")
-    return {}
-
-def queue_workflow(workflow, client_id, comfy_org_api_key=None):
-    payload={"prompt":workflow,"client_id":client_id}
-    kenv=os.environ.get("COMFY_ORG_API_KEY")
-    keff=comfy_org_api_key or kenv
-    if keff: payload["extra_data"]={"api_key_comfy_org": keff}
-    data=json.dumps(payload).encode()
-    r=requests.post(f"http://{COMFY_HOST}/prompt",data=data,headers={"Content-Type":"application/json"},timeout=30)
-    if r.status_code==400:
-        print(f"[h3] 400 {r.text[:2000]}")
-        try:
-            err=r.json()
-            msg="Workflow validation failed"; details=[]
-            if "error" in err:
-                ei=err["error"]
-                if isinstance(ei,dict): msg=ei.get("message",msg)
-                else: msg=str(ei)
-            if "node_errors" in err:
-                for nid, ne in err["node_errors"].items():
-                    if isinstance(ne,dict):
-                        for k,v in ne.items(): details.append(f"Node {nid} ({k}): {v}")
-                    else: details.append(f"Node {nid}: {ne}")
-            if details:
-                raise ValueError(msg+":\n"+"\n".join("• "+d for d in details))
-            raise ValueError(msg+f" Raw: {r.text[:1200]}")
-        except ValueError: raise
-        except Exception:
-            raise ValueError(f"Validation failed: {r.text[:1500]}")
-    r.raise_for_status(); return r.json()
-
-def get_history(pid): 
-    r=requests.get(f"http://{COMFY_HOST}/history/{pid}",timeout=30); r.raise_for_status(); return r.json()
-
-def get_file_bytes(filename, subfolder, ftype):
-    print(f"[h3] fetch {ftype}/{subfolder}/{filename}")
-    qs=urllib.parse.urlencode({"filename":filename,"subfolder":subfolder,"type":ftype})
-    try:
-        r=requests.get(f"http://{COMFY_HOST}/view?{qs}",timeout=60); r.raise_for_status()
-        return r.content
-    except Exception as e:
-        print(f"[h3] fetch err {e}"); return None
 
 def handler(job):
     if is_network_volume_debug_enabled():
-        try: run_network_volume_diagnostics()
-        except: pass
-    inp=job["input"]; jid=job["id"]
-    validated, err = validate_input(inp)
-    if err: return {"error": err}
-    workflow=validated["workflow"]; input_images=validated.get("images")
-
-    if not check_server(f"http://{COMFY_HOST}/", COMFY_MAX_RETRIES, COMFY_INTERVAL_MS):
-        return {"error": f"ComfyUI server ({COMFY_HOST}) not reachable"}
-
-    if input_images:
-        up=upload_images(input_images)
-        if up["status"]=="error":
-            return {"error":"Failed to upload one or more input assets","details": up["details"]}
-
-    ws=None; client_id=str(uuid.uuid4()); prompt_id=None; output_data=[]; errors=[]
-    try:
-        ws_url=f"ws://{COMFY_HOST}/ws?clientId={client_id}"
-        print(f"[h3] ws connect {ws_url}")
-        ws=websocket.WebSocket(); ws.connect(ws_url,timeout=10)
-        print("[h3] ws connected")
         try:
-            qd=queue_workflow(workflow, client_id, comfy_org_api_key=validated.get("comfy_org_api_key"))
-            prompt_id=qd.get("prompt_id")
-            if not prompt_id: raise ValueError(f"Missing prompt_id in {qd}")
-            print(f"[h3] queued {prompt_id}")
-        except requests.RequestException as e:
-            raise ValueError(f"Error queuing workflow: {e}")
-
-        print(f"[h3] waiting execution {prompt_id}...")
-        done=False
-        while True:
+            run_network_volume_diagnostics()
+        except:
+            pass
+    inp = job["input"]
+    validated, err = validate_input(inp)
+    if err:
+        return {"error": err}
+    if validated["mode"] == "sd-cli":
+        print(f"[h3] sd-cli mode prompt={validated['prompt'][:80]} {validated['width']}x{validated['height']} len={validated['length']}")
+        return run_sd_cli(job["id"], validated["prompt"], validated["width"], validated["height"], validated["length"], validated["steps"], validated["seed"], validated["images"], validated.get("negative_prompt",""))
+    # ComfyUI path
+    import requests, websocket, uuid, urllib.parse
+    workflow = validated["workflow"]
+    input_images = validated.get("images")
+    if not check_server(f"http://{COMFY_HOST}/", 0, 50):
+        return {"error": f"ComfyUI server ({COMFY_HOST}) not reachable"}
+    # upload images
+    if input_images:
+        for im in input_images:
             try:
-                out=ws.recv()
-                if isinstance(out,str):
-                    m=json.loads(out)
-                    if m.get("type")=="status": pass
-                    elif m.get("type")=="executing":
-                        d=m.get("data",{})
-                        if d.get("node") is None and d.get("prompt_id")==prompt_id:
-                            print(f"[h3] execution finished {prompt_id}"); done=True; break
-                    elif m.get("type")=="execution_error":
-                        d=m.get("data",{})
-                        if d.get("prompt_id")==prompt_id:
-                            ed=f"Node {d.get('node_type')} {d.get('node_id')}: {d.get('exception_message')}"
-                            print(f"[h3] execution_error {ed}"); errors.append(f"Workflow execution error: {ed}"); break
-            except websocket.WebSocketTimeoutException: continue
-            except websocket.WebSocketConnectionClosedException as ce:
-                ws=_attempt_ws_reconnect(ws_url, WS_RECONNECT_ATTEMPTS, WS_RECONNECT_DELAY, ce)
-                print("[h3] resumed after reconnect"); continue
-            except json.JSONDecodeError: continue
-
-        if not done and not errors:
-            raise ValueError("Monitoring loop exited without completion")
-
-        print(f"[h3] fetching history {prompt_id}")
-        hist=get_history(prompt_id)
+                name = im["name"]
+                uri = im["image"]
+                b64 = uri.split(",",1)[1] if "," in uri else uri
+                blob = base64.b64decode(b64)
+                files = {"image": (name, BytesIO(blob), "image/png"), "overwrite": (None, "true")}
+                r = requests.post(f"http://{COMFY_HOST}/upload/image", files=files, timeout=30)
+                r.raise_for_status()
+            except Exception as e:
+                return {"error": f"Failed to upload {im.get('name')}: {e}"}
+    # queue via ComfyUI (simplified)
+    try:
+        client_id = str(uuid.uuid4())
+        payload = {"prompt": workflow, "client_id": client_id}
+        if validated.get("comfy_org_api_key"):
+            payload["extra_data"] = {"api_key_comfy_org": validated["comfy_org_api_key"]}
+        r = requests.post(f"http://{COMFY_HOST}/prompt", data=json.dumps(payload).encode(), headers={"Content-Type":"application/json"}, timeout=30)
+        if r.status_code == 400:
+            try:
+                err = r.json()
+                return {"error": f"Workflow validation failed: {err}"}
+            except:
+                return {"error": f"Validation failed: {r.text[:1500]}"}
+        r.raise_for_status()
+        qd = r.json()
+        prompt_id = qd.get("prompt_id")
+        if not prompt_id:
+            return {"error": f"Missing prompt_id in {qd}"}
+        # wait via websocket (simplified polling)
+        ws = websocket.WebSocket()
+        ws.connect(f"ws://{COMFY_HOST}/ws?clientId={client_id}", timeout=10)
+        done = False
+        while True:
+            out = ws.recv()
+            if isinstance(out, str):
+                m = json.loads(out)
+                if m.get("type") == "executing" and m.get("data",{}).get("node") is None and m.get("data",{}).get("prompt_id") == prompt_id:
+                    done = True
+                    break
+                if m.get("type") == "execution_error" and m.get("data",{}).get("prompt_id") == prompt_id:
+                    return {"error": f"Workflow execution error: {m.get('data')}"}
+        ws.close()
+        # fetch history
+        r = requests.get(f"http://{COMFY_HOST}/history/{prompt_id}", timeout=30)
+        r.raise_for_status()
+        hist = r.json()
         if prompt_id not in hist:
-            msg=f"prompt {prompt_id} not in history"
-            print(f"[h3] {msg}")
-            if not errors: return {"error": msg}
-            errors.append(msg); return {"error":"Job processing failed, prompt not in history","details":errors}
-        outputs=hist[prompt_id].get("outputs",{})
-        if not outputs:
-            msg=f"No outputs for {prompt_id}"; print(f"[h3] {msg}")
-            if not errors: errors.append(msg)
-        print(f"[h3] processing {len(outputs)} nodes")
-        MEDIA_KEYS=("images","gifs","videos","audio","audios")
+            return {"error": f"prompt {prompt_id} not in history"}
+        outputs = hist[prompt_id].get("outputs",{})
+        from runpod.serverless.utils import rp_upload as _rp
+        out_list = []
         for nid, nout in outputs.items():
-            handled=[k for k in nout.keys() if k in MEDIA_KEYS]
-            unhandled=[k for k in nout.keys() if k not in MEDIA_KEYS]
-            if unhandled: print(f"[h3] warn node {nid} unhandled {unhandled}")
-            for mk in handled:
-                items=nout[mk] or []
-                print(f"[h3] node {nid} [{mk}] {len(items)} file(s)")
-                for info in items:
-                    fn=info.get("filename"); sub=info.get("subfolder",""); ftype=info.get("type")
-                    if ftype=="temp":
-                        print(f"[h3] skip temp {fn}"); continue
-                    if not fn:
-                        w=f"node {nid} {mk} missing filename {info}"; print(f"[h3] {w}"); errors.append(w); continue
-                    b=get_file_bytes(fn,sub,ftype)
-                    if not b:
-                        e2=f"failed fetch {mk} {fn}"; print(f"[h3] {e2}"); errors.append(e2); continue
-                    ext=os.path.splitext(fn)[1] or (".mp4" if mk in ("gifs","videos") else ".png")
+            for mk in ("images","gifs","videos","audio","audios"):
+                for info in nout.get(mk,[]):
+                    fn = info.get("filename")
+                    sub = info.get("subfolder","")
+                    ftype = info.get("type")
+                    if not fn or ftype == "temp":
+                        continue
+                    qs = urllib.parse.urlencode({"filename": fn, "subfolder": sub, "type": ftype})
+                    rb = requests.get(f"http://{COMFY_HOST}/view?{qs}", timeout=60).content
                     if os.environ.get("BUCKET_ENDPOINT_URL"):
-                        try:
-                            with tempfile.NamedTemporaryFile(suffix=ext,delete=False) as tf:
-                                tf.write(b); tfp=tf.name
-                            print(f"[h3] uploading {fn} to S3...")
-                            url=rp_upload.upload_image(jid, tfp)
-                            os.remove(tfp); print(f"[h3] S3 {url}")
-                            output_data.append({"filename":fn,"type":"s3_url","data":url,"media_type":mk})
-                        except Exception as e:
-                            e3=f"S3 upload {fn}: {e}"; print(f"[h3] {e3}"); errors.append(e3)
-                            try: os.remove(tfp)
-                            except: pass
+                        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(fn)[1] or ".mp4", delete=False) as tf:
+                            tf.write(rb)
+                            tfp = tf.name
+                        url = _rp.upload_image(job["id"], tfp)
+                        os.remove(tfp)
+                        out_list.append({"filename": fn, "type": "s3_url", "data": url})
                     else:
-                        try:
-                            b64=base64.b64encode(b).decode()
-                            output_data.append({"filename":fn,"type":"base64","data":b64,"media_type":mk})
-                            print(f"[h3] encoded {fn} [{mk}] {len(b)} bytes")
-                        except Exception as e:
-                            e3=f"b64 {fn}: {e}"; print(f"[h3] {e3}"); errors.append(e3)
-    except websocket.WebSocketException as e:
-        print(f"[h3] ws err {e}\n{traceback.format_exc()}"); return {"error": f"WebSocket error: {e}"}
-    except requests.RequestException as e:
-        print(f"[h3] http err {e}\n{traceback.format_exc()}"); return {"error": f"HTTP error: {e}"}
-    except ValueError as e:
-        print(f"[h3] value err {e}\n{traceback.format_exc()}"); return {"error": str(e)}
+                        out_list.append({"filename": fn, "type": "base64", "data": base64.b64encode(rb).decode()})
+        if not out_list:
+            return {"error": "No outputs"}
+        return {"images": out_list}
     except Exception as e:
-        print(f"[h3] unexpected {e}\n{traceback.format_exc()}"); return {"error": f"Unexpected: {e}"}
-    finally:
-        if ws and getattr(ws,"connected",False):
-            try: ws.close()
-            except: pass
-            print("[h3] ws closed")
+        print(f"[h3] ComfyUI err {e}\n{traceback.format_exc()}")
+        return {"error": str(e)}
 
-    result={}
-    if output_data: result["images"]=output_data
-    if errors: result["errors"]=errors; print(f"[h3] done with warnings {errors}")
-    if not output_data and errors:
-        return {"error":"Job processing failed","details":errors}
-    if not output_data and not errors:
-        print("[h3] success but no outputs"); result["status"]="success_no_images"; result["images"]=[]
-    print(f"[h3] done returning {len(output_data)} file(s)")
-    return result
-
-if __name__=="__main__":
-    print("[h3] starting handler...")
-    runpod.serverless.start({"handler":handler})
+if __name__ == "__main__":
+    print("[h3] starting handler (sd-cli + ComfyUI fallback)...")
+    runpod.serverless.start({"handler": handler})

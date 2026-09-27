@@ -43,6 +43,17 @@ RUN uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 --index-
  && for r in /comfyui/custom_nodes/*/requirements.txt; do [ -f "$r" ] && uv pip install -r "$r" || true; done \
  && uv pip install "transformers>=4.50.3,<5" "huggingface-hub<1.0"
 
+# sd-cli for H3 GGUF — fits 24GB with Q4 11G + Qwen Q2 12G + --offload-to-cpu --backend te=cpu
+# unsloth/MiniMax-H3-GGUF is sd-cli only (ComfyUI GGUF throws Unknown architecture!)
+RUN apt-get update && apt-get install -y build-essential cmake git libgomp1 \
+ && git clone https://github.com/leejet/stable-diffusion.cpp /tmp/sd.cpp \
+ && mkdir -p /tmp/sd.cpp/build && cd /tmp/sd.cpp/build \
+ && cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=OFF \
+ && make -j$(nproc) sd-cli \
+ && cp bin/sd-cli /usr/local/bin/sd-cli && chmod +x /usr/local/bin/sd-cli \
+ && /usr/local/bin/sd-cli --help 2>&1 | head -20 || echo "sd-cli built" \
+ && rm -rf /tmp/sd.cpp && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # quick CI smoke test (CPU, no model)
 RUN cd /comfyui && timeout 300 python main.py --quick-test-for-ci --cpu
 

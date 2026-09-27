@@ -435,42 +435,69 @@ ln -sf "$TARGET_FILE" "$ALT_LINK" 2>/dev/null || true
 
 fi # end skip-GGUF when ALREADY_BAKED
 
-# ── Required H3 models for native 0.33.1 pipeline (bakes missing — resume-safe) ─
-# playground/workflow uses:
-#   text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors  (~17GB? actually ~9GB shard)
-#   vae/minimax_h3_video_vae_int8_convrot.safetensors
-#   vae/minimax_h3_audio_vae_fp32.safetensors
-# Without these, ComfyUI fails to load CLIPLoader/VAELoader. Fetch from Comfy-Org/MiniMax-H3.
+# ── Required H3 models for sd-cli (Q4 11G + Qwen Q2 12G + VAEs — fits 24GB) ─
+# sd-cli mode:  unsloth/MiniMax-H3-GGUF  (not ComfyUI GGUF — Unknown architecture!)
+#   diffusion:  minimax_h3_ref2va_pruned-Q4_K.gguf  (10.60GB) OR Abiray Q4_K_M (11.56GB) — both work, handler picks either
+#   llm:        qwen3vl_32b_minimax_h3-Q2_K_M.gguf   (12.2GB, fits 24GB)  [PRIMARY for sd-cli]
+#               qwen3vl_32b_minimax_h3-Q4_K_M.gguf   (16.97GB alternative, needs 32GB+)
+#   vae:        minimax_h3_video_vae (int8_convrot 2.7G or fp16) + minimax_h3_audio_vae_fp32 578M
+# ComfyUI fallback still needs: qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors (15G) — fetched if missing but not required for sd-cli
 echo ""
-echo -e "${BOLD}── Required MiniMax-H3 models (CLIP + VAEs) ──${NC}"
+echo -e "${BOLD}── Required MiniMax-H3 models (sd-cli Qwen Q2 + VAEs) ──${NC}"
 mkdir -p "$VOLUME/models/text_encoders" "$VOLUME/models/vae" 2>/dev/null || true
 [ -n "$SECONDARY" ] && mkdir -p "$SECONDARY/models/text_encoders" "$SECONDARY/models/vae" 2>/dev/null || true
-# Qwen3-VL CLIP
+# Qwen3-VL GGUF for sd-cli — Q2_K_M 12.2GB (fits 24GB with Q4 11G + VAEs ~3.4G = ~23GB disk, ~18GB VRAM offload)
+if [ ! -f "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ]; then
+  echo -e "${GREEN}→ fetching Qwen Q2_K_M GGUF for sd-cli (unsloth/MiniMax-H3-GGUF 12.2GB) …${NC}"
+  echo -e "${DIM}  This is the ONLY LLM that works with sd-cli --mode vid_gen on 24GB (--offload-to-cpu --backend te=cpu)${NC}"
+  HF_CLI download unsloth/MiniMax-H3-GGUF qwen3vl_32b_minimax_h3-Q2_K_M.gguf --local-dir "$VOLUME/models/text_encoders" --local-dir-use-symlinks False 2>&1 | tail -20 || true
+  # huggingface-cli with --local-dir flattens into subfolder by repo structure — find and move if needed
+  FOUND_Q2=$(find "$VOLUME/models/text_encoders" -name "qwen3vl_32b_minimax_h3-Q2_K_M.gguf" -type f 2>/dev/null | head -1)
+  if [ -n "$FOUND_Q2" ] && [ "$FOUND_Q2" != "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ]; then
+    echo -e "${DIM}  moving $FOUND_Q2 → $VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf${NC}"
+    mv -f "$FOUND_Q2" "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" 2>/dev/null || cp -f "$FOUND_Q2" "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" 2>/dev/null || true
+  fi
+  # fallback wget if hf failed
+  if [ ! -f "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" ]; then
+    echo -e "${YELLOW}  hf download failed/missing, trying wget resume…${NC}"
+    wget -c --progress=bar:force -O "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf.tmp" "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" 2>&1 | tail -5 || true
+    [ -f "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf.tmp" ] && mv -f "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf.tmp" "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" || true
+  fi
+  ls -lh "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" 2>/dev/null | sed 's/^/  /' || echo -e "${YELLOW}  still missing — re-run script${NC}"
+else echo -e "${GREEN}✔ text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf present ($(du -h "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3-Q2_K_M.gguf" 2>/dev/null | cut -f1))${NC}"; fi
+# ComfyUI CLIP fallback (optional, for workflow mode — not needed for sd-cli but keep if space)
 if [ ! -f "$VOLUME/models/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" ]; then
-  echo -e "${GREEN}→ fetching Qwen3-VL CLIP (Comfy-Org/MiniMax-H3) …${NC}"
-  HF_CLI download Comfy-Org/MiniMax-H3 qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors --local-dir "$VOLUME/models/text_encoders" --local-dir-use-symlinks False 2>&1 | tail -5 || true
-  # hf download flattens? ensure correct name/loc
-  find "$VOLUME/models/text_encoders" -name "qwen3vl*" -type f 2>/dev/null | head
+  echo -e "${DIM}○ ComfyUI CLIP qwen3vl_nvfp4_awq.safetensors not present — optional (only for ComfyUI workflow mode, 15GB). Skipping to save space. Fetch manually if you need workflow mode:${NC}"
+  echo -e "${DIM}  huggingface-cli download Comfy-Org/MiniMax-H3 text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors --local-dir $VOLUME/models/text_encoders${NC}"
 else echo -e "${GREEN}✔ text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors present${NC}"; fi
 # Video VAE
-if [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_int8_convrot.safetensors" ]; then
+if [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_int8_convrot.safetensors" ] && [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_fp16.safetensors" ]; then
   echo -e "${GREEN}→ fetching video VAE …${NC}"
   HF_CLI download Comfy-Org/MiniMax-H3 minimax_h3_video_vae_int8_convrot.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -5 || true
-else echo -e "${GREEN}✔ vae/minimax_h3_video_vae_int8_convrot.safetensors present${NC}"; fi
+  # also try text_encoders/vae subpath variant
+  if [ ! -f "$VOLUME/models/vae/minimax_h3_video_vae_int8_convrot.safetensors" ]; then
+    HF_CLI download Comfy-Org/MiniMax-H3 vae/minimax_h3_video_vae_int8_convrot.safetensors --local-dir "$VOLUME/models" --local-dir-use-symlinks False 2>&1 | tail -5 || true
+    find "$VOLUME/models" -name "minimax_h3_video_vae*" -type f 2>/dev/null | head
+  fi
+else echo -e "${GREEN}✔ vae video present${NC}"; ls -lh "$VOLUME/models/vae/minimax_h3_video"* 2>/dev/null | sed 's/^/  /'; fi
 # Audio VAE
 if [ ! -f "$VOLUME/models/vae/minimax_h3_audio_vae_fp32.safetensors" ]; then
   echo -e "${GREEN}→ fetching audio VAE …${NC}"
   HF_CLI download Comfy-Org/MiniMax-H3 minimax_h3_audio_vae_fp32.safetensors --local-dir "$VOLUME/models/vae" --local-dir-use-symlinks False 2>&1 | tail -5 || true
+  if [ ! -f "$VOLUME/models/vae/minimax_h3_audio_vae_fp32.safetensors" ]; then
+    HF_CLI download Comfy-Org/MiniMax-H3 vae/minimax_h3_audio_vae_fp32.safetensors --local-dir "$VOLUME/models" --local-dir-use-symlinks False 2>&1 | tail -5 || true
+  fi
 else echo -e "${GREEN}✔ vae/minimax_h3_audio_vae_fp32.safetensors present${NC}"; fi
 # Cross-link secondary view
 if [ -n "$SECONDARY" ]; then
-  for f in qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors; do [ -f "$VOLUME/models/text_encoders/$f" ] && ln -sf "$VOLUME/models/text_encoders/$f" "$SECONDARY/models/text_encoders/$f" 2>/dev/null || true; done
-  for f in minimax_h3_video_vae_int8_convrot.safetensors minimax_h3_audio_vae_fp32.safetensors; do [ -f "$VOLUME/models/vae/$f" ] && ln -sf "$VOLUME/models/vae/$f" "$SECONDARY/models/vae/$f" 2>/dev/null || true; done
+  for f in qwen3vl_32b_minimax_h3-Q2_K_M.gguf qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors; do [ -f "$VOLUME/models/text_encoders/$f" ] && ln -sf "$VOLUME/models/text_encoders/$f" "$SECONDARY/models/text_encoders/$f" 2>/dev/null || true; done
+  for f in minimax_h3_video_vae_int8_convrot.safetensors minimax_h3_video_vae_fp16.safetensors minimax_h3_audio_vae_fp32.safetensors; do [ -f "$VOLUME/models/vae/$f" ] && ln -sf "$VOLUME/models/vae/$f" "$SECONDARY/models/vae/$f" 2>/dev/null || true; done
   mkdir -p /runpod-volume/models/text_encoders /runpod-volume/models/vae 2>/dev/null || true
-  for f in qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors; do [ -f "$VOLUME/models/text_encoders/$f" ] && ln -sf "$VOLUME/models/text_encoders/$f" /runpod-volume/models/text_encoders/"$f" 2>/dev/null || true; done
-  for f in minimax_h3_video_vae_int8_convrot.safetensors minimax_h3_audio_vae_fp32.safetensors; do [ -f "$VOLUME/models/vae/$f" ] && ln -sf "$VOLUME/models/vae/$f" /runpod-volume/models/vae/"$f" 2>/dev/null || true; done
+  for f in qwen3vl_32b_minimax_h3-Q2_K_M.gguf qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors; do [ -f "$VOLUME/models/text_encoders/$f" ] && ln -sf "$VOLUME/models/text_encoders/$f" /runpod-volume/models/text_encoders/"$f" 2>/dev/null || true; done
+  for f in minimax_h3_video_vae_int8_convrot.safetensors minimax_h3_video_vae_fp16.safetensors minimax_h3_audio_vae_fp32.safetensors; do [ -f "$VOLUME/models/vae/$f" ] && ln -sf "$VOLUME/models/vae/$f" /runpod-volume/models/vae/"$f" 2>/dev/null || true; done
 fi
 echo -e "${DIM}  (if downloads failed due to network, re-run script — it resumes)${NC}"
+echo -e "${DIM}  sd-cli needs: diffusion Q4 11G + Qwen Q2 12G + VAEs 3.4G ≈ 27GB — ensure volume ≥50GB (you have 70GB)${NC}"
 
 # ── Final report ─────────────────────────────────────────────────────────────
 echo ""
